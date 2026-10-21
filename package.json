@@ -1,0 +1,71 @@
+{
+  "name": "@tetherto/wdk-protocol-bridge-usdt0-solana",
+  "version": "1.0.0-beta.1",
+  "description": "USD₮0 bridge module for WDK (Wallet Development Kit) by Tether, for cross-chain transfers from Solana wallet accounts.",
+  "keywords": [
+    "wdk",
+    "protocol",
+    "bridge",
+    "usdt0",
+    "solana",
+    "layerzero"
+  ],
+  "author": "Tether",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/tetherto/wdk-protocol-bridge-usdt0-solana.git"
+  },
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "build:types": "tsc",
+    "lint": "standard",
+    "lint:fix": "standard --fix",
+    "test": "cross-env NODE_OPTIONS=--experimental-vm-modules jest",
+    "test:coverage": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --coverage"
+  },
+  "dependencies": {
+    "@solana/addresses": "3.0.3",
+    "@solana/codecs": "3.0.3",
+    "@solana/transaction-messages": "3.0.3",
+    "@tetherto/wdk-utils": "1.0.0-beta.12",
+    "@tetherto/wdk-wallet": "1.0.0-beta.22",
+    "@tetherto/wdk-wallet-solana": "1.0.0-beta.18",
+    "@ton/core": "0.61.0",
+    "bare-node-runtime": "^1.4.0"
+  },
+  "devDependencies": {
+    "cross-env": "10.0.0",
+    "jest": "30.0.5",
+    "standard": "17.1.2",
+    "typescript": "5.8.3"
+  },
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "bare": "./bare.js",
+      "default": "./index.js"
+    },
+    "./package": {
+      "default": "./package.json"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "standard": {
+    "ignore": [
+      "bare.js",
+      "tests/**/*.js"
+    ]
+  },
+  "directories": {
+    "test": "tests"
+  },
+  "bugs": {
+    "url": "https://github.com/tetherto/wdk-protocol-bridge-usdt0-solana/issues"
+  },
+  "homepage": "https://docs.wdk.tether.io/sdk/bridge-modules/bridge-usdt0-solana/"
+}
