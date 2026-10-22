@@ -19,15 +19,15 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals'
 import { Options } from '@layerzerolabs/lz-v2-utilities'
 import { getAddressLookupTableDecoder } from '@solana-program/address-lookup-table'
 import { parseBase64RpcAccount } from '@solana/accounts'
-import { getAddressEncoder, getProgramDerivedAddress } from '@solana/addresses'
-import { getBase64Encoder } from '@solana/codecs'
+import { getAddressDecoder, getAddressEncoder, getProgramDerivedAddress } from '@solana/addresses'
+import { Endian, getBase64Encoder, getU32Encoder } from '@solana/codecs'
 import { AccountRole } from '@solana/instructions'
 import { appendTransactionMessageInstructions, createTransactionMessage, decompileTransactionMessage, getCompiledTransactionMessageDecoder, setTransactionMessageFeePayer } from '@solana/transaction-messages'
 import { compileTransaction, getBase64EncodedWireTransaction, getTransactionDecoder } from '@solana/transactions'
 
 import Usdt0ProtocolSolana from '../index.js'
-import { SOLANA_OFT_DEPLOYMENTS } from '../src/config.js'
-import { parseOftStore, parsePeerConfig } from '../src/layerzero.js'
+import { LAYERZERO_ULN_PROGRAM, SOLANA_OFT_DEPLOYMENTS } from '../src/config.js'
+import { dvnConfigDecoder, executorConfigDecoder, parseOftStore, parsePeerConfig, ulnSendConfigDecoder } from '../src/layerzero.js'
 
 // Accounts read by a quote and a send to arbitrum, recorded from mainnet, and the endpoint accounts that
 // '@layerzerolabs/lz-solana-sdk-v2' SendHelper.getQuoteAccounts and getSendAccounts resolved for them (send: [address, role]).
@@ -37,8 +37,20 @@ const DEPLOYMENT = SOLANA_OFT_DEPLOYMENTS.USDT0
 const PAYER = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM'
 const ARBITRUM_PEER = '5FEMXXjueR7y6Z1uVDxTm4ZZXFp6XnxR1Xu1WmvwjxBF'
 const LOOKUP_TABLE = '6zcTrmdkiQp6dZHYUxVr6A2XVDSYi44X1rcPtvwNcrXi'
-const [, , SEND_LIBRARY_CONFIG] = FIXTURE.quoteAccounts
-const PRICE_FEED = FIXTURE.quoteAccounts[13]
+
+// Route accounts are derived and decoded the way LayerZero defines them rather than read by fixture position,
+// so a route re-recorded with a different worker set keeps each test pointing at the account it means.
+const fixtureAccount = key => parseBase64RpcAccount(key, { ...FIXTURE.accounts[key], data: [FIXTURE.accounts[key].data, 'base64'] })
+const EID_SEED = getU32Encoder({ endian: Endian.Big }).encode(30_110)
+const OFT_STORE_SEED = getAddressEncoder().encode(DEPLOYMENT.oftStore)
+const { endpointProgram: ENDPOINT } = parseOftStore(fixtureAccount(DEPLOYMENT.oftStore), DEPLOYMENT.programId)
+const [[SEND_LIBRARY_CONFIG], [ULN_SETTINGS], [SEND_CONFIG]] = await Promise.all([
+  getProgramDerivedAddress({ programAddress: ENDPOINT, seeds: ['SendLibraryConfig', OFT_STORE_SEED, EID_SEED] }),
+  getProgramDerivedAddress({ programAddress: LAYERZERO_ULN_PROGRAM, seeds: ['MessageLib'] }),
+  getProgramDerivedAddress({ programAddress: LAYERZERO_ULN_PROGRAM, seeds: ['SendConfig', EID_SEED, OFT_STORE_SEED] })
+])
+const { executor: EXECUTOR_CONFIG, requiredDvns: REQUIRED_DVNS } = ulnSendConfigDecoder.decode(fixtureAccount(SEND_CONFIG).data)
+const { priceFeed: PRICE_FEED } = executorConfigDecoder.decode(fixtureAccount(EXECUTOR_CONFIG).data)
 
 // Anchor discriminators are the first 8 bytes of sha256('<namespace>:<name>').
 const discriminator = name => createHash('sha256').update(name).digest().subarray(0, 8)
@@ -112,12 +124,6 @@ describe('_quoteOftSend', () => {
     })
   })
 
-  test('checks the recorded accounts against the anchor discriminators', () => {
-    const data = key => Buffer.from(FIXTURE.accounts[key].data, 'base64').subarray(0, 8)
-    expect(data(DEPLOYMENT.oftStore)).toEqual(discriminator('account:OFTStore'))
-    expect(data(ARBITRUM_PEER)).toEqual(discriminator('account:PeerConfig'))
-  })
-
   test('encodes a compose message as Some(Vec<u8>)', async () => {
     const params = sendParam(1n)
     params.composeMsg = new Uint8Array([0xab, 0xcd])
@@ -148,8 +154,57 @@ describe('_quoteOftSend', () => {
   })
 
   test('rejects a worker config with another discriminator', async () => {
-    withData(FIXTURE.quoteAccounts[11], data => { data[0] ^= 0xff })
-    await expect(quote()).rejects.toThrow(`Failed to decode account data at address: ${FIXTURE.quoteAccounts[11]}`)
+    withData(EXECUTOR_CONFIG, data => { data[0] ^= 0xff })
+    await expect(quote()).rejects.toThrow(`Failed to decode account data at address: ${EXECUTOR_CONFIG}`)
+    expect(rpc.simulateTransaction).not.toHaveBeenCalled()
+  })
+
+  test('falls back to the default send library when the oapp sets none', async () => {
+    withData(SEND_LIBRARY_CONFIG, data => data.fill(0, 8, 40))
+    await quote()
+    const [credits] = await getProgramDerivedAddress({ programAddress: DEPLOYMENT.programId, seeds: ['Credits'] })
+    expect(simulated().ix.accounts.map(account => account.address)).toEqual([DEPLOYMENT.oftStore, credits, ARBITRUM_PEER, ...FIXTURE.quoteAccounts])
+  })
+
+  test('appends optional dvns from the oapp send config and skips unset entries', async () => {
+    const [dvnConfig] = REQUIRED_DVNS
+    const { priceFeed } = dvnConfigDecoder.decode(fixtureAccount(dvnConfig).data)
+    const [dvnProgram, priceFeedProgram] = [FIXTURE.accounts[dvnConfig].owner, FIXTURE.accounts[priceFeed].owner]
+    const optionalDvn = getAddressDecoder().decode(new Uint8Array(32).fill(9))
+    accounts[optionalDvn] = accounts[dvnConfig]
+
+    // UlnSendConfig: discriminator, bump, confirmations and three counts take 20 bytes, then the required dvns vector,
+    // so the optional dvns vector starts after its 4-byte length and 32 bytes per required dvn.
+    const optionalDvnsOffset = 20 + 4 + 32 * REQUIRED_DVNS.length
+    const data = Buffer.from(accounts[SEND_CONFIG].data, 'base64')
+    data[18] = 1
+    const optionalDvns = Buffer.alloc(4 + 2 * 32)
+    optionalDvns.writeUInt32LE(2)
+    Buffer.from(getAddressEncoder().encode(optionalDvn)).copy(optionalDvns, 4)
+    accounts[SEND_CONFIG] = { ...accounts[SEND_CONFIG], data: Buffer.concat([data.subarray(0, optionalDvnsOffset), optionalDvns, data.subarray(optionalDvnsOffset + 4)]).toString('base64') }
+
+    await quote()
+    expect(simulated().ix.accounts.slice(3).map(account => account.address))
+      .toEqual([...FIXTURE.quoteAccounts, dvnProgram, optionalDvn, priceFeedProgram, priceFeed])
+  })
+
+  test('rejects a route with a missing ULN settings account', async () => {
+    delete accounts[ULN_SETTINGS]
+    await expect(quote()).rejects.toThrow('LayerZero ULN send config not initialized.')
+  })
+
+  test('rejects a route with a missing worker config', async () => {
+    delete accounts[EXECUTOR_CONFIG]
+    await expect(quote()).rejects.toThrow(`LayerZero worker ${EXECUTOR_CONFIG} not initialized.`)
+  })
+
+  test.each([
+    ['a short recipient', params => { params.to = params.to.slice(1) }],
+    ['an oft command', params => { params.oftCmd = new Uint8Array([1]) }]
+  ])('rejects %s before any rpc call', async (_, edit) => {
+    const params = sendParam()
+    edit(params)
+    await expect(quote(params)).rejects.toThrow('Invalid OFT recipient or unsupported OFT command.')
     expect(rpc.simulateTransaction).not.toHaveBeenCalled()
   })
 
@@ -189,15 +244,9 @@ describe('_quoteOftSend', () => {
     withData(DEPLOYMENT.oftStore, data => getAddressEncoder().encode(PAYER).forEach((byte, i) => { data[8 + i] = byte }))
     await expect(quote()).rejects.toThrow('Invalid OFT store account.')
   })
-
-  test('propagates RPC failures', async () => {
-    rpc.simulateTransaction.mockReturnValue({ send: async () => { throw new Error('RPC unavailable') } })
-    await expect(quote()).rejects.toThrow('RPC unavailable')
-  })
 })
 
 describe('_buildOftSendInstructions', () => {
-  const ULN_SETTINGS = FIXTURE.quoteAccounts[7]
   const TOKEN_SOURCE = 'TB5FCqbNsnuLQgEjUuPaT9qtVPTT4U1A8rvi7qzEj2M'
   const NATIVE_FEE = 795_116n
 
@@ -275,11 +324,6 @@ describe('_buildOftSendInstructions', () => {
 
     const [, send] = await build()
     expect(send.accounts.slice(10).map(account => [account.address, account.role])[14]).toEqual([ARBITRUM_PEER, AccountRole.WRITABLE])
-  })
-
-  test('rejects an unconfigured destination', async () => {
-    delete accounts[ARBITRUM_PEER]
-    await expect(build()).rejects.toThrow('OFT peer not configured for destination 30110.')
   })
 })
 

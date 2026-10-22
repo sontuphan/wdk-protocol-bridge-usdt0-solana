@@ -20,7 +20,6 @@ const toHex = (bytes) => getBase16Decoder().decode(bytes)
 
 const INSTRUCTION = { programAddress: SOLANA_ADDRESS, accounts: [], data: new Uint8Array([1]) }
 
-// A 3 bps store fee, as on mainnet.
 const ROUTE = { store: { feeBps: 3 } }
 
 describe('Usdt0ProtocolSolana', () => {
@@ -172,6 +171,23 @@ describe('Usdt0ProtocolSolana', () => {
       await expect(protocol.quoteBridge({ targetChain: 'arbitrum', recipient: '0x0000000000000000000000000000000000000000', token: MINT, amount: 100 }))
         .rejects.toThrow("Invalid recipient address for target chain 'arbitrum': ZERO_ADDRESS.")
     })
+
+    test('should throw for ton addresses outside the base workchain', () => {
+      const masterchainAddress = new Address(-1, Buffer.alloc(32, 7)).toString()
+
+      expect(() => encode('ton', masterchainAddress))
+        .toThrow("Invalid recipient address for target chain 'ton': UNSUPPORTED_WORKCHAIN.")
+    })
+
+    test('should throw for the tron zero address', () => {
+      expect(() => encode('tron', 'T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb'))
+        .toThrow("Invalid recipient address for target chain 'tron': ZERO_ADDRESS.")
+    })
+
+    test('should throw for chains without a recipient encoding', () => {
+      expect(() => encode('solana', SOLANA_ADDRESS))
+        .toThrow("Target chain 'solana' not supported.")
+    })
   })
 
   describe('getSupportedChains', () => {
@@ -199,6 +215,17 @@ describe('Usdt0ProtocolSolana', () => {
 
     test('should return an empty list for unknown chains', async () => {
       expect(await protocol.getSupportedTokens({ fromChain: 'unknown' })).toEqual([])
+    })
+
+    test('should resolve chains by key, ignoring case', async () => {
+      const tokens = await protocol.getSupportedTokens({ toChain: 'ARBITRUM' })
+
+      expect(tokens).toEqual([{ token: 'USDT0', chain: 'arbitrum', symbol: 'USDT0', decimals: 6, name: 'USDT0' }])
+    })
+
+    test('should filter tokens by symbol, ignoring case', async () => {
+      expect(await protocol.getSupportedTokens({ fromToken: 'usdt0' })).toEqual([{ token: 'USDT0', chain: 'solana', symbol: 'USDT0', decimals: 6, name: 'USDT0', address: MINT }])
+      expect(await protocol.getSupportedTokens({ fromToken: 'XAUT0' })).toEqual([])
     })
   })
 })
