@@ -71,11 +71,22 @@ describe('Usdt0ProtocolSolana', () => {
     test('should throw if the bridge cost exceeds the bridge max fee', async () => {
       protocol = new Usdt0ProtocolSolana(account, { bridgeMaxFee: 1_000_000n })
       jest.spyOn(protocol, '_getOftRoute').mockResolvedValue(ROUTE)
-    jest.spyOn(protocol, '_quoteOftSend').mockResolvedValue({ nativeFee: 1_000_000n, lzTokenFee: 0n })
+      jest.spyOn(protocol, '_quoteOftSend').mockResolvedValue({ nativeFee: 1_000_000n, lzTokenFee: 0n })
       jest.spyOn(protocol, '_buildOftSendInstructions').mockResolvedValue([INSTRUCTION])
 
       await expect(protocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 100 }))
         .rejects.toThrow('Exceeded maximum fee cost for bridge operation.')
+    })
+
+    test('should allow a bridge cost equal to the bridge max fee', async () => {
+      protocol = new Usdt0ProtocolSolana(account, { bridgeMaxFee: 1_005_000n })
+      jest.spyOn(protocol, '_getOftRoute').mockResolvedValue(ROUTE)
+      jest.spyOn(protocol, '_quoteOftSend').mockResolvedValue({ nativeFee: 1_000_000n, lzTokenFee: 0n })
+      jest.spyOn(protocol, '_buildOftSendInstructions').mockResolvedValue([INSTRUCTION])
+
+      const result = await protocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 100 })
+
+      expect(result).toEqual({ hash: 'dummy-signature', fee: 5_000n, bridgeFee: 1_000_000n })
     })
 
     test('should throw if the account is read-only', async () => {

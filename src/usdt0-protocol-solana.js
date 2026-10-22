@@ -180,7 +180,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
     const { fee } = await this._account.quoteSendTransaction(tx)
 
-    if (this._config.bridgeMaxFee !== undefined && fee + bridgeFee >= this._config.bridgeMaxFee) {
+    if (this._config.bridgeMaxFee !== undefined && fee + bridgeFee > this._config.bridgeMaxFee) {
       throw new Error('Exceeded maximum fee cost for bridge operation.')
     }
 
