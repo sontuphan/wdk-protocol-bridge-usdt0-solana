@@ -56,7 +56,7 @@ describe('_quoteOftSend', () => {
     oftCmd: new Uint8Array()
   })
 
-  const quote = (params = sendParam()) => protocol._quoteOftSend(DEPLOYMENT, params)
+  const quote = async (params = sendParam()) => protocol._quoteOftSend(await protocol._getOftRoute(DEPLOYMENT, params.dstEid), params)
 
   const simulated = () => {
     const [wire] = rpc.simulateTransaction.mock.calls[0]
@@ -203,7 +203,7 @@ describe('_buildOftSendInstructions', () => {
 
   let accounts, protocol
 
-  const build = () => protocol._buildOftSendInstructions(DEPLOYMENT, {
+  const build = async () => protocol._buildOftSendInstructions(await protocol._getOftRoute(DEPLOYMENT, 30_110), {
     dstEid: 30_110,
     to: protocol._encodeRecipient('arbitrum', '0xa460AEbce0d3A4BecAd8ccf9D6D4861296c503Bd'),
     amountLD: 1_000_000n,

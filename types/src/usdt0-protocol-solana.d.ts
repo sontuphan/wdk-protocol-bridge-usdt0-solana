@@ -114,16 +114,14 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     private _resolveChainKey;
     /** @private */
     private _getBridgeTransaction;
-    /** @private */
-    private _getOftDeployment;
     /**
      * Quotes the layerzero messaging fee of an oft send by simulating the oft program's 'quote_send' instruction.
      *
      * @private
-     * @param {typeof SOLANA_OFT_DEPLOYMENTS[keyof typeof SOLANA_OFT_DEPLOYMENTS]} deployment - The oft deployment.
+     * @param {OftRoute} route - The oft accounts for the destination.
      * @param {OftSendParam} sendParam - The send parameters.
      * @returns {Promise<{ nativeFee: bigint, lzTokenFee: bigint }>} The messaging fee, in lamports.
-     * @throws {Error} If the deployment, route, or simulation result is invalid.
+     * @throws {Error} If the route or the simulation result is invalid.
      * @see https://github.com/LayerZero-Labs/usdt-native-mesh/blob/main/programs/oft/src/instructions/quote_send.rs
      */
     private _quoteOftSend;
@@ -158,7 +156,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
      * Builds the oft program's 'send' instruction(s).
      *
      * @private
-     * @param {typeof SOLANA_OFT_DEPLOYMENTS[keyof typeof SOLANA_OFT_DEPLOYMENTS]} deployment - The oft deployment.
+     * @param {OftRoute} route - The oft accounts for the destination.
      * @param {OftSendParam} sendParam - The send parameters.
      * @param {bigint} nativeFee - The layerzero native fee to pay, in lamports.
      * @param {string} sender - The sender's address.

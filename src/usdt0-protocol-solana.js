@@ -43,7 +43,7 @@ import {
 import { compileTransaction, getBase64EncodedWireTransaction } from '@solana/transactions'
 import { Address } from '@ton/core'
 
-import { FEE_TOLERANCE, SOURCE_CHAIN, SOLANA_OFT_DEPLOYMENTS, BLOCKCHAINS, TOKENS, LAYERZERO_ULN_PROGRAM } from './config.js'
+import { SOURCE_CHAIN, SOLANA_OFT_DEPLOYMENTS, BLOCKCHAINS, TOKENS, LAYERZERO_ULN_PROGRAM } from './config.js'
 import {
   dvnConfigDecoder,
   executorConfigDecoder,
@@ -298,7 +298,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       throw new Error('The target chain cannot be equal to the source chain.')
     }
 
-    const deployment = this._getOftDeployment(token)
+    const deployment = Object.values(SOLANA_OFT_DEPLOYMENTS).find(({ mint }) => mint === token)
 
     if (!deployment) {
       throw new Error(`Token '${token}' not supported on this chain.`)
@@ -310,55 +310,51 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       throw new Error(`Invalid recipient address for target chain '${targetChain}': ZERO_ADDRESS.`)
     }
 
+    const eid = dstEid ?? BLOCKCHAINS[targetChain].eid
+
+    const route = await this._getOftRoute(deployment, eid)
+
+    // Mirrors the program's debit_view: it takes fee_bps out of the amount, rounded down, and the rest must arrive.
+    const oftFee = amount * BigInt(route.store.feeBps) / 10_000n
+
     /** @type {OftSendParam} */
     const sendParam = {
-      dstEid: dstEid ?? BLOCKCHAINS[targetChain].eid,
+      dstEid: eid,
       to,
       amountLD: amount,
-      minAmountLD: amount * FEE_TOLERANCE / 1_000n,
+      minAmountLD: amount - oftFee,
       extraOptions: Options.newOptions().toBytes(),
       composeMsg: new Uint8Array(),
       oftCmd: new Uint8Array()
     }
 
-    const { nativeFee: bridgeFee } = await this._quoteOftSend(deployment, sendParam)
+    const { nativeFee: bridgeFee } = await this._quoteOftSend(route, sendParam)
 
     const sender = await this._account.getAddress()
 
-    const instructions = await this._buildOftSendInstructions(deployment, sendParam, bridgeFee, sender)
+    const instructions = await this._buildOftSendInstructions(route, sendParam, bridgeFee, sender)
 
     const tx = appendTransactionMessageInstructions(instructions, createTransactionMessage({ version: 0 }))
 
     return { tx, bridgeFee }
   }
 
-  /** @private */
-  _getOftDeployment (token) {
-    for (const deployment of Object.values(SOLANA_OFT_DEPLOYMENTS)) {
-      if (deployment.mint && deployment.mint === token) {
-        return deployment
-      }
-    }
-
-    return null
-  }
-
   /**
    * Quotes the layerzero messaging fee of an oft send by simulating the oft program's 'quote_send' instruction.
    *
    * @private
-   * @param {typeof SOLANA_OFT_DEPLOYMENTS[keyof typeof SOLANA_OFT_DEPLOYMENTS]} deployment - The oft deployment.
+   * @param {OftRoute} route - The oft accounts for the destination.
    * @param {OftSendParam} sendParam - The send parameters.
    * @returns {Promise<{ nativeFee: bigint, lzTokenFee: bigint }>} The messaging fee, in lamports.
-   * @throws {Error} If the deployment, route, or simulation result is invalid.
+   * @throws {Error} If the route or the simulation result is invalid.
    * @see https://github.com/LayerZero-Labs/usdt-native-mesh/blob/main/programs/oft/src/instructions/quote_send.rs
    */
-  async _quoteOftSend (deployment, sendParam) {
+  async _quoteOftSend (route, sendParam) {
     if (sendParam.to.length !== 32 || sendParam.oftCmd.length !== 0) {
       throw new Error('Invalid OFT recipient or unsupported OFT command.')
     }
 
-    const { programAddress, oftStore, peer, credits, store, peerConfig, lookupTables } = await this._getOftRoute(deployment, sendParam.dstEid)
+    const { programAddress, oftStore, peer, credits, store, peerConfig, lookupTables } = route
 
     const remainingAccounts = await this._getEndpointAccounts(store.endpointProgram, oftStore, sendParam.dstEid, peerConfig.peerAddress)
 
@@ -395,7 +391,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
     const bytes = encoding === 'base64' ? getBase64Encoder().encode(fee) : new Uint8Array()
 
-    if (programId !== deployment.programId || bytes.length !== messagingFeeDecoder.fixedSize) {
+    if (programId !== programAddress || bytes.length !== messagingFeeDecoder.fixedSize) {
       throw new Error('Invalid OFT quote return data.')
     }
 
@@ -590,15 +586,15 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
    * Builds the oft program's 'send' instruction(s).
    *
    * @private
-   * @param {typeof SOLANA_OFT_DEPLOYMENTS[keyof typeof SOLANA_OFT_DEPLOYMENTS]} deployment - The oft deployment.
+   * @param {OftRoute} route - The oft accounts for the destination.
    * @param {OftSendParam} sendParam - The send parameters.
    * @param {bigint} nativeFee - The layerzero native fee to pay, in lamports.
    * @param {string} sender - The sender's address.
    * @returns {Promise<import('@solana/instructions').Instruction[]>} The instructions.
    * @see https://github.com/LayerZero-Labs/usdt-native-mesh/blob/main/programs/oft/src/instructions/send.rs
    */
-  async _buildOftSendInstructions (deployment, sendParam, nativeFee, sender) {
-    const { programAddress, oftStore, peer, credits, store, peerConfig, lookupTables } = await this._getOftRoute(deployment, sendParam.dstEid)
+  async _buildOftSendInstructions (route, sendParam, nativeFee, sender) {
+    const { programAddress, oftStore, peer, credits, store, peerConfig, lookupTables } = route
 
     const signer = address(sender)
 

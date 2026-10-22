@@ -20,6 +20,9 @@ const toHex = (bytes) => getBase16Decoder().decode(bytes)
 
 const INSTRUCTION = { programAddress: SOLANA_ADDRESS, accounts: [], data: new Uint8Array([1]) }
 
+// A 3 bps store fee, as on mainnet.
+const ROUTE = { store: { feeBps: 3 } }
+
 describe('Usdt0ProtocolSolana', () => {
   let account, protocol
 
@@ -33,23 +36,27 @@ describe('Usdt0ProtocolSolana', () => {
 
     protocol = new Usdt0ProtocolSolana(account)
 
+    jest.spyOn(protocol, '_getOftRoute').mockResolvedValue(ROUTE)
     jest.spyOn(protocol, '_quoteOftSend').mockResolvedValue({ nativeFee: 1_000_000n, lzTokenFee: 0n })
     jest.spyOn(protocol, '_buildOftSendInstructions').mockResolvedValue([INSTRUCTION])
   })
 
   describe('bridge', () => {
     test('should successfully perform a bridge operation', async () => {
-      const result = await protocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 100 })
+      const result = await protocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 1_000_000 })
 
       expect(result).toEqual({ hash: 'dummy-signature', fee: 5_000n, bridgeFee: 1_000_000n })
 
       const [tx] = account.sendTransaction.mock.calls[0]
       expect(tx.instructions).toEqual([INSTRUCTION])
 
-      const [, sendParam, nativeFee, sender] = protocol._buildOftSendInstructions.mock.calls[0]
+      const [route, sendParam, nativeFee, sender] = protocol._buildOftSendInstructions.mock.calls[0]
+      expect(route).toBe(ROUTE)
+      expect(protocol._quoteOftSend).toHaveBeenCalledWith(ROUTE, sendParam)
       expect(sendParam.dstEid).toBe(30_110)
-      expect(sendParam.amountLD).toBe(100n)
-      expect(sendParam.minAmountLD).toBe(99n)
+      expect(sendParam.amountLD).toBe(1_000_000n)
+      // The 3 bps store fee is 300, so exactly the rest must arrive.
+      expect(sendParam.minAmountLD).toBe(999_700n)
       expect(nativeFee).toBe(1_000_000n)
       expect(sender).toBe(SOLANA_ADDRESS)
     })
@@ -63,7 +70,8 @@ describe('Usdt0ProtocolSolana', () => {
 
     test('should throw if the bridge cost exceeds the bridge max fee', async () => {
       protocol = new Usdt0ProtocolSolana(account, { bridgeMaxFee: 1_000_000n })
-      jest.spyOn(protocol, '_quoteOftSend').mockResolvedValue({ nativeFee: 1_000_000n, lzTokenFee: 0n })
+      jest.spyOn(protocol, '_getOftRoute').mockResolvedValue(ROUTE)
+    jest.spyOn(protocol, '_quoteOftSend').mockResolvedValue({ nativeFee: 1_000_000n, lzTokenFee: 0n })
       jest.spyOn(protocol, '_buildOftSendInstructions').mockResolvedValue([INSTRUCTION])
 
       await expect(protocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 100 }))

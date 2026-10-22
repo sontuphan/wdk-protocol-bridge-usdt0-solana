@@ -1,4 +1,3 @@
-export const FEE_TOLERANCE: 999n;
 /**
  * The chain key of the source chain this module bridges from.
  */
