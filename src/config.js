@@ -14,6 +14,8 @@
 
 'use strict'
 
+import { address } from '@solana/addresses'
+
 /**
  * The chain key of the source chain this module bridges from.
  */
@@ -35,7 +37,7 @@ export const SOLANA_OFT_DEPLOYMENTS = {
  * The LayerZero V2 ULN (ultra light node) message library program on Solana mainnet.
  * @see https://docs.layerzero.network/v2/deployments/deployed-contracts
  */
-export const LAYERZERO_ULN_PROGRAM = '7a4WjyR8VZ7yZz5XJAKm39BUGn5iT9CKcv2pmG9tdXVH'
+export const LAYERZERO_ULN_PROGRAM = address('7a4WjyR8VZ7yZz5XJAKm39BUGn5iT9CKcv2pmG9tdXVH')
 
 /**
  * The source chain and the destinations of the USDT0 Legacy Mesh, which pools native USDT on each chain.

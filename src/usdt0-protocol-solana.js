@@ -67,6 +67,7 @@ import {
 
 /** @typedef {import('@solana/addresses').Address} SolanaAddress */
 /** @typedef {import('@solana/codecs').ReadonlyUint8Array} ReadonlyUint8Array */
+/** @typedef {import('@solana/instructions').Instruction} Instruction */
 
 const SEND_COMPUTE_UNIT_LIMIT = 400_000
 
@@ -437,6 +438,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       throw new Error(`OFT peer not configured for destination ${dstEid}.`)
     }
 
+    /** @type {OftRoute['lookupTables']} */
     const lookupTables = {}
 
     if (store.alt) {
@@ -485,7 +487,8 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       await fetchEncodedAccounts(this._account._rpc, [sendLibraryConfig, defaultSendLibraryConfig, sendConfig, defaultSendConfig, uln], { commitment: this._account._commitment })
 
     // The decoders check each account's anchor discriminator, and decodeAccount names the account that fails; owners are checked here.
-    if ([sendLibraryConfigAccount, defaultSendLibraryConfigAccount].some((account) => !account.exists || account.programAddress !== endpoint)) {
+    if (!sendLibraryConfigAccount.exists || !defaultSendLibraryConfigAccount.exists ||
+        sendLibraryConfigAccount.programAddress !== endpoint || defaultSendLibraryConfigAccount.programAddress !== endpoint) {
       throw new Error('LayerZero send library not initialized.')
     }
 
@@ -501,9 +504,8 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     }
 
     // The oapp send config is optional; the default send config and the ULN settings are not.
-    const ulnAccounts = [defaultSendConfigAccount, ulnAccount, ...(sendConfigAccount.exists ? [sendConfigAccount] : [])]
-
-    if (ulnAccounts.some((account) => !account.exists || account.programAddress !== LAYERZERO_ULN_PROGRAM)) {
+    if (!defaultSendConfigAccount.exists || !ulnAccount.exists ||
+        [defaultSendConfigAccount, ulnAccount, ...(sendConfigAccount.exists ? [sendConfigAccount] : [])].some((account) => account.programAddress !== LAYERZERO_ULN_PROGRAM)) {
       throw new Error('LayerZero ULN send config not initialized.')
     }
 
@@ -520,17 +522,15 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
     const workers = [executor, ...requiredDvns, ...optionalDvns]
 
-    const workerConfigs = await fetchEncodedAccounts(this._account._rpc, workers, { commitment: this._account._commitment })
-
-    const priceFeeds = workerConfigs.map((config, i) => {
+    const workerConfigs = (await fetchEncodedAccounts(this._account._rpc, workers, { commitment: this._account._commitment })).map((config, i) => {
       if (!config.exists) {
         throw new Error(`LayerZero worker ${workers[i]} not initialized.`)
       }
 
-      return decodeAccount(config, i === 0 ? executorConfigDecoder : dvnConfigDecoder).data.priceFeed
+      return { program: config.programAddress, priceFeed: decodeAccount(config, i === 0 ? executorConfigDecoder : dvnConfigDecoder).data.priceFeed }
     })
 
-    const priceFeedAccounts = await fetchEncodedAccounts(this._account._rpc, priceFeeds, { commitment: this._account._commitment })
+    const priceFeedAccounts = await fetchEncodedAccounts(this._account._rpc, workerConfigs.map(({ priceFeed }) => priceFeed), { commitment: this._account._commitment })
 
     const [[sendLibraryInfo], [endpointSettings], [nonce], [endpointEventAuthority], [ulnEventAuthority]] = await Promise.all([
       getProgramDerivedAddress({ programAddress: endpoint, seeds: ['MessageLib', getAddressEncoder().encode(uln)] }),
@@ -541,17 +541,21 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     ])
 
     // Each worker contributes its program, its config (written to when charged on a send), and its price feed's program and config.
+    /** @type {Array<[SolanaAddress, AccountRole?]>} */
     const workerAccounts = workers.flatMap((worker, i) => {
-      if (!priceFeedAccounts[i].exists) {
-        throw new Error(`LayerZero price feed ${priceFeeds[i]} not initialized.`)
+      const priceFeed = priceFeedAccounts[i]
+
+      if (!priceFeed.exists) {
+        throw new Error(`LayerZero price feed ${priceFeed.address} not initialized.`)
       }
 
-      return [[workerConfigs[i].programAddress], [worker, payer ? AccountRole.WRITABLE : AccountRole.READONLY], [priceFeedAccounts[i].programAddress], [priceFeeds[i]]]
+      return [[workerConfigs[i].program], [worker, payer ? AccountRole.WRITABLE : AccountRole.READONLY], [priceFeed.programAddress], [priceFeed.address]]
     })
 
     // The ULN pays its protocol fee to the treasury when one is set, and otherwise takes its own program as a placeholder.
     const treasury = payer && decodeAccount(ulnAccount, ulnSettingsDecoder).data.treasury?.nativeReceiver
 
+    /** @type {Array<[SolanaAddress, AccountRole?]>} */
     const accounts = payer
       ? [
           [endpoint],
@@ -599,7 +603,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
    * @param {OftSendParam} sendParam - The send parameters.
    * @param {bigint} nativeFee - The layerzero native fee to pay, in lamports.
    * @param {string} sender - The sender's address.
-   * @returns {Promise<import('@solana/instructions').Instruction[]>} The instructions.
+   * @returns {Promise<readonly Instruction[]>} The instructions.
    * @see https://github.com/LayerZero-Labs/usdt-native-mesh/blob/main/programs/oft/src/instructions/send.rs
    */
   async _buildOftSendInstructions (route, sendParam, nativeFee, sender) {
@@ -615,7 +619,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
     const instruction = {
       programAddress,
-      accounts: [
+      accounts: /** @type {Array<[SolanaAddress, AccountRole?]>} */ ([
         [signer, AccountRole.READONLY_SIGNER],
         [peer],
         [oftStore, AccountRole.WRITABLE],
@@ -626,7 +630,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
         [TOKEN_PROGRAM_ADDRESS],
         [eventAuthority],
         [programAddress]
-      ].map(([account, role = AccountRole.READONLY]) => ({ address: account, role })).concat(remainingAccounts),
+      ]).map(([account, role = AccountRole.READONLY]) => ({ address: account, role })).concat(remainingAccounts),
       data: sendEncoder.encode({ ...sendParam, nativeFee, lzTokenFee: 0n })
     }
 
