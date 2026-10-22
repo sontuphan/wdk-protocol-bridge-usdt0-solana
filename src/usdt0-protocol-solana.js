@@ -66,6 +66,7 @@ import {
 /** @typedef {import('@tetherto/wdk-wallet').IWalletAccountReadOnly} IWalletAccountReadOnly */
 
 /** @typedef {import('@solana/addresses').Address} SolanaAddress */
+/** @typedef {import('@solana/codecs').ReadonlyUint8Array} ReadonlyUint8Array */
 
 const SEND_COMPUTE_UNIT_LIMIT = 400_000
 
@@ -120,7 +121,7 @@ const U64_MAX = 0xffffffffffffffffn
 /**
  * @typedef {object} OftSendParam
  * @property {number} dstEid - The LayerZero destination endpoint id.
- * @property {Uint8Array} to - The recipient address, encoded as 32 bytes.
+ * @property {ReadonlyUint8Array} to - The recipient address, encoded as 32 bytes.
  * @property {bigint} amountLD - The amount to send, in local decimals.
  * @property {bigint} minAmountLD - The minimum amount to receive, in local decimals.
  * @property {Uint8Array} extraOptions - The LayerZero executor options.
@@ -462,7 +463,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
    * @param {SolanaAddress} endpoint - The layerzero endpoint program.
    * @param {SolanaAddress} sender - The oapp sending the message (the oft store).
    * @param {number} dstEid - The destination endpoint id.
-   * @param {Uint8Array} receiver - The remote peer, encoded as 32 bytes.
+   * @param {ReadonlyUint8Array} receiver - The remote peer, encoded as 32 bytes.
    * @param {SolanaAddress} [payer] - The account paying the messaging fee, for a send.
    * @returns {Promise<import('@solana/instructions').AccountMeta[]>} The accounts.
    * @throws {Error} If the route is not configured or uses a message library other than the ULN.
@@ -645,7 +646,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
    * @private
    * @param {string} targetChain - The target chain.
    * @param {string} recipient - The recipient's address.
-   * @returns {Uint8Array} The encoded address.
+   * @returns {ReadonlyUint8Array} The encoded address.
    */
   _encodeRecipient (targetChain, recipient) {
     const { type } = BLOCKCHAINS[targetChain]

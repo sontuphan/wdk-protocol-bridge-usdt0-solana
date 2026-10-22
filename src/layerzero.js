@@ -43,6 +43,7 @@ import {
 } from '@solana/codecs'
 
 /** @typedef {import('@solana/addresses').Address} Address */
+/** @typedef {import('@solana/codecs').ReadonlyUint8Array} ReadonlyUint8Array */
 /** @typedef {import('@solana/accounts').MaybeEncodedAccount} MaybeEncodedAccount */
 
 /**
@@ -66,8 +67,8 @@ import {
  * A Legacy Mesh oft peer config account.
  *
  * @typedef {Object} PeerConfig
- * @property {Uint8Array} peerAddress - The remote peer, encoded as 32 bytes.
- * @property {{ withdrawRemote: Uint8Array, sendOft: Uint8Array, sendCredits: Uint8Array, sendOftAndCall: Uint8Array }} enforcedOptions - The enforced options per message type.
+ * @property {ReadonlyUint8Array} peerAddress - The remote peer, encoded as 32 bytes.
+ * @property {{ withdrawRemote: ReadonlyUint8Array, sendOft: ReadonlyUint8Array, sendCredits: ReadonlyUint8Array, sendOftAndCall: ReadonlyUint8Array }} enforcedOptions - The enforced options per message type.
  * @property {number} bump - The pda bump.
  */
 
