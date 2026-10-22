@@ -50,6 +50,18 @@
  * @property {Uint8Array} composeMsg - The compose message.
  * @property {Uint8Array} oftCmd - The oft command.
  */
+/**
+ * The oft accounts a quote or a send to a destination reads.
+ *
+ * @typedef {Object} OftRoute
+ * @property {SolanaAddress} programAddress - The oft program.
+ * @property {SolanaAddress} oftStore - The oft store.
+ * @property {SolanaAddress} peer - The destination's peer config.
+ * @property {SolanaAddress} credits - The credits account.
+ * @property {import('./layerzero.js').OftStore} store - The parsed oft store.
+ * @property {import('./layerzero.js').PeerConfig} peerConfig - The parsed peer config.
+ * @property {Record<SolanaAddress, SolanaAddress[]>} lookupTables - The store's address lookup table, by address.
+ */
 export default class Usdt0ProtocolSolana extends BridgeProtocol {
     /**
      * Creates a new read-only interface to the usdt0 protocol for the solana blockchain.
@@ -116,19 +128,32 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
      */
     private _quoteOftSend;
     /**
-     * Resolves the endpoint and message library accounts an oapp forwards to the layerzero endpoint's 'quote' instruction.
+     * Fetches and validates the oft accounts a quote or a send to a destination reads.
      *
-     * Port of `SendHelper.getQuoteAccounts` from `@layerzerolabs/lz-solana-sdk-v2`, restricted to the ULN message library.
+     * @private
+     * @param {typeof SOLANA_OFT_DEPLOYMENTS[keyof typeof SOLANA_OFT_DEPLOYMENTS]} deployment - The oft deployment.
+     * @param {number} dstEid - The destination endpoint id.
+     * @returns {Promise<OftRoute>} The oft accounts.
+     * @throws {Error} If the store, the peer, or the lookup table is invalid.
+     */
+    private _getOftRoute;
+    /**
+     * Resolves the endpoint and message library accounts an oapp forwards to the layerzero endpoint's 'quote' instruction,
+     * or to its 'send' instruction when a payer is given.
+     *
+     * Port of `SendHelper.getQuoteAccounts` and `SendHelper.getSendAccounts` from `@layerzerolabs/lz-solana-sdk-v2`,
+     * restricted to the ULN message library.
      *
      * @private
      * @param {SolanaAddress} endpoint - The layerzero endpoint program.
      * @param {SolanaAddress} sender - The oapp sending the message (the oft store).
      * @param {number} dstEid - The destination endpoint id.
      * @param {Uint8Array} receiver - The remote peer, encoded as 32 bytes.
-     * @returns {Promise<import('@solana/instructions').AccountMeta[]>} The accounts, all read-only.
+     * @param {SolanaAddress} [payer] - The account paying the messaging fee, for a send.
+     * @returns {Promise<import('@solana/instructions').AccountMeta[]>} The accounts.
      * @throws {Error} If the route is not configured or uses a message library other than the ULN.
      */
-    private _getQuoteSendAccounts;
+    private _getEndpointAccounts;
     /**
      * Builds the oft program's 'send' instruction(s).
      *
@@ -138,6 +163,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
      * @param {bigint} nativeFee - The layerzero native fee to pay, in lamports.
      * @param {string} sender - The sender's address.
      * @returns {Promise<import('@solana/instructions').Instruction[]>} The instructions.
+     * @see https://github.com/LayerZero-Labs/usdt-native-mesh/blob/main/programs/oft/src/instructions/send.rs
      */
     private _buildOftSendInstructions;
     /**
@@ -149,8 +175,6 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
      * @returns {Uint8Array} The encoded address.
      */
     private _encodeRecipient;
-    /** @private */
-    private _padBytes32;
     /** @private */
     private _assertValidRecipient;
 }
@@ -283,5 +307,38 @@ export type OftSendParam = {
      * - The oft command.
      */
     oftCmd: Uint8Array;
+};
+/**
+ * The oft accounts a quote or a send to a destination reads.
+ */
+export type OftRoute = {
+    /**
+     * - The oft program.
+     */
+    programAddress: SolanaAddress;
+    /**
+     * - The oft store.
+     */
+    oftStore: SolanaAddress;
+    /**
+     * - The destination's peer config.
+     */
+    peer: SolanaAddress;
+    /**
+     * - The credits account.
+     */
+    credits: SolanaAddress;
+    /**
+     * - The parsed oft store.
+     */
+    store: import("./layerzero.js").OftStore;
+    /**
+     * - The parsed peer config.
+     */
+    peerConfig: import("./layerzero.js").PeerConfig;
+    /**
+     * - The store's address lookup table, by address.
+     */
+    lookupTables: Record<SolanaAddress, SolanaAddress[]>;
 };
 import { BridgeProtocol } from '@tetherto/wdk-wallet/protocols';

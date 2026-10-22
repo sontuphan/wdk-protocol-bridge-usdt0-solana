@@ -47,4 +47,4 @@ Source code must be strictly typed using JSDoc comments to support the `build:ty
 - **Key Technology:** LayerZero V2.
 - **Features:** Cross-chain USDT0 transfers (OFT standard).
 - **Compatibility:** Works with `wdk-wallet-solana` accounts.
-- **Status:** Boilerplate. `_quoteOftSend` and `_buildOftSendInstructions` in `src/usdt0-protocol-solana.js` and `SOLANA_OFT_DEPLOYMENTS` in `src/config.js` are TODO.
+- **Status:** Quote and send are implemented for the mainnet Legacy Mesh deployment (`SOLANA_OFT_DEPLOYMENTS` in `src/config.js`).

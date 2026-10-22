@@ -17,27 +17,21 @@
 import { BridgeProtocol } from '@tetherto/wdk-wallet/protocols'
 import { validateEVMAddress, validateTonAddress, validateTronAddress } from '@tetherto/wdk-utils'
 
-import { Options } from '@layerzerolabs/lz-v2-utilities'
+import { Options, addressToBytes32 } from '@layerzerolabs/lz-v2-utilities'
 
 import { ADDRESS_LOOKUP_TABLE_PROGRAM_ADDRESS, getAddressLookupTableDecoder } from '@solana-program/address-lookup-table'
 import { MAX_COMPUTE_UNIT_LIMIT, getSetComputeUnitLimitInstruction } from '@solana-program/compute-budget'
 import { SYSTEM_PROGRAM_ADDRESS } from '@solana-program/system'
+import { TOKEN_PROGRAM_ADDRESS, findAssociatedTokenPda } from '@solana-program/token'
+import { fetchEncodedAccounts } from '@solana/accounts'
 import { address, getAddressEncoder, getProgramDerivedAddress } from '@solana/addresses'
 import {
   Endian,
-  addEncoderSizePrefix,
-  fixEncoderSize,
-  getBase16Encoder,
   getBase58Encoder,
   getBase64Encoder,
-  getBooleanEncoder,
   getBytesEncoder,
-  getOptionEncoder,
-  getStructDecoder,
-  getStructEncoder,
   getU32Encoder,
-  getU64Decoder,
-  getU64Encoder
+  padLeftEncoder
 } from '@solana/codecs'
 import { AccountRole } from '@solana/instructions'
 import {
@@ -57,8 +51,12 @@ import {
   getPeerAddress,
   parseOftStore,
   parsePeerConfig,
+  messagingFeeDecoder,
+  quoteSendEncoder,
+  sendEncoder,
   sendLibraryConfigDecoder,
-  ulnSendConfigDecoder
+  ulnSendConfigDecoder,
+  ulnSettingsDecoder
 } from './layerzero.js'
 
 /** @typedef {import('@tetherto/wdk-wallet/protocols').BridgeProtocolConfig} BridgeProtocolConfig */
@@ -69,25 +67,8 @@ import {
 
 /** @typedef {import('@solana/addresses').Address} SolanaAddress */
 
-// Anchor instruction discriminator: the first 8 bytes of sha256('global:quote_send').
-const QUOTE_SEND_DISCRIMINATOR = 'cf0031d6a0d34cd3'
-
-// Legacy Mesh 'quote_send' arguments, borsh-encoded.
-const QUOTE_SEND_ENCODER = getStructEncoder([
-  ['discriminator', fixEncoderSize(getBytesEncoder(), 8)],
-  ['dstEid', getU32Encoder()],
-  ['to', fixEncoderSize(getBytesEncoder(), 32)],
-  ['amountLD', getU64Encoder()],
-  ['minAmountLD', getU64Encoder()],
-  ['extraOptions', addEncoderSizePrefix(getBytesEncoder(), getU32Encoder())],
-  ['composeMsg', getOptionEncoder(addEncoderSizePrefix(getBytesEncoder(), getU32Encoder()))],
-  ['payInLzToken', getBooleanEncoder()]
-])
-
-const MESSAGING_FEE_DECODER = getStructDecoder([
-  ['nativeFee', getU64Decoder()],
-  ['lzTokenFee', getU64Decoder()]
-])
+// Sends measured 277k to 281k compute units on the mainnet routes; the limit leaves headroom for fee config changes.
+const SEND_COMPUTE_UNIT_LIMIT = 400_000
 
 /**
  * A chain supported by the protocol, in the canonical WDK swidge shape.
@@ -144,6 +125,19 @@ const MESSAGING_FEE_DECODER = getStructDecoder([
  * @property {Uint8Array} extraOptions - The LayerZero executor options.
  * @property {Uint8Array} composeMsg - The compose message.
  * @property {Uint8Array} oftCmd - The oft command.
+ */
+
+/**
+ * The oft accounts a quote or a send to a destination reads.
+ *
+ * @typedef {Object} OftRoute
+ * @property {SolanaAddress} programAddress - The oft program.
+ * @property {SolanaAddress} oftStore - The oft store.
+ * @property {SolanaAddress} peer - The destination's peer config.
+ * @property {SolanaAddress} credits - The credits account.
+ * @property {import('./layerzero.js').OftStore} store - The parsed oft store.
+ * @property {import('./layerzero.js').PeerConfig} peerConfig - The parsed peer config.
+ * @property {Record<SolanaAddress, SolanaAddress[]>} lookupTables - The store's address lookup table, by address.
  */
 
 export default class Usdt0ProtocolSolana extends BridgeProtocol {
@@ -364,57 +358,14 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       throw new Error('Invalid OFT recipient or unsupported OFT command.')
     }
 
-    const programAddress = address(deployment.programId)
+    const { programAddress, oftStore, peer, credits, store, peerConfig, lookupTables } = await this._getOftRoute(deployment, sendParam.dstEid)
 
-    const oftStore = address(deployment.oftStore)
-
-    const [peer, credits] = await Promise.all([getPeerAddress(programAddress, sendParam.dstEid), getCreditsAddress(programAddress)])
-
-    const { value: [storeAccount, peerAccount] } = await this._account._rpc
-      .getMultipleAccounts([oftStore, peer], { encoding: 'base64', commitment: this._account._commitment })
-      .send()
-
-    const store = parseOftStore(storeAccount, programAddress)
-
-    if (!store || store.tokenMint !== deployment.mint) {
-      throw new Error('Invalid OFT store account.')
-    }
-
-    const peerConfig = parsePeerConfig(peerAccount, programAddress)
-
-    if (!peerConfig) {
-      throw new Error(`OFT peer not configured for destination ${sendParam.dstEid}.`)
-    }
-
-    const remainingAccounts = await this._getQuoteSendAccounts(store.endpointProgram, oftStore, sendParam.dstEid, peerConfig.peerAddress)
+    const remainingAccounts = await this._getEndpointAccounts(store.endpointProgram, oftStore, sendParam.dstEid, peerConfig.peerAddress)
 
     const instruction = {
       programAddress,
       accounts: [oftStore, credits, peer].map((account) => ({ address: account, role: AccountRole.READONLY })).concat(remainingAccounts),
-      data: QUOTE_SEND_ENCODER.encode({
-        discriminator: getBase16Encoder().encode(QUOTE_SEND_DISCRIMINATOR),
-        dstEid: sendParam.dstEid,
-        to: sendParam.to,
-        amountLD: sendParam.amountLD,
-        minAmountLD: sendParam.minAmountLD,
-        extraOptions: sendParam.extraOptions,
-        composeMsg: sendParam.composeMsg.length ? sendParam.composeMsg : null,
-        payInLzToken: false
-      })
-    }
-
-    const lookupTables = {}
-
-    if (store.alt) {
-      const { value: [table] } = await this._account._rpc
-        .getMultipleAccounts([store.alt], { encoding: 'base64', commitment: this._account._commitment })
-        .send()
-
-      if (!table || table.owner !== ADDRESS_LOOKUP_TABLE_PROGRAM_ADDRESS) {
-        throw new Error('Invalid OFT address lookup table account.')
-      }
-
-      lookupTables[store.alt] = getAddressLookupTableDecoder().decode(getBase64Encoder().encode(table.data[0])).addresses
+      data: quoteSendEncoder.encode({ ...sendParam, payInLzToken: false })
     }
 
     // No lifetime is set: the message compiles with an empty blockhash, which the rpc replaces during the simulation.
@@ -440,31 +391,79 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       throw new Error(`OFT quote simulation failed: ${error}. ${(value.logs ?? []).join('\n')}`)
     }
 
-    const returned = value.returnData
+    const { programId, data: [fee, encoding] = [] } = value.returnData ?? {}
 
-    const fee = returned?.data?.[1] === 'base64' ? getBase64Encoder().encode(returned.data[0]) : undefined
+    const bytes = encoding === 'base64' ? getBase64Encoder().encode(fee) : new Uint8Array()
 
-    if (returned?.programId !== deployment.programId || fee?.length !== 16) {
+    if (programId !== deployment.programId || bytes.length !== messagingFeeDecoder.fixedSize) {
       throw new Error('Invalid OFT quote return data.')
     }
 
-    return MESSAGING_FEE_DECODER.decode(fee)
+    return messagingFeeDecoder.decode(bytes)
   }
 
   /**
-   * Resolves the endpoint and message library accounts an oapp forwards to the layerzero endpoint's 'quote' instruction.
+   * Fetches and validates the oft accounts a quote or a send to a destination reads.
    *
-   * Port of `SendHelper.getQuoteAccounts` from `@layerzerolabs/lz-solana-sdk-v2`, restricted to the ULN message library.
+   * @private
+   * @param {typeof SOLANA_OFT_DEPLOYMENTS[keyof typeof SOLANA_OFT_DEPLOYMENTS]} deployment - The oft deployment.
+   * @param {number} dstEid - The destination endpoint id.
+   * @returns {Promise<OftRoute>} The oft accounts.
+   * @throws {Error} If the store, the peer, or the lookup table is invalid.
+   */
+  async _getOftRoute (deployment, dstEid) {
+    const programAddress = address(deployment.programId)
+
+    const oftStore = address(deployment.oftStore)
+
+    const [peer, credits] = await Promise.all([getPeerAddress(programAddress, dstEid), getCreditsAddress(programAddress)])
+
+    const [storeAccount, peerAccount] = await fetchEncodedAccounts(this._account._rpc, [oftStore, peer], { commitment: this._account._commitment })
+
+    const store = parseOftStore(storeAccount, programAddress)
+
+    if (!store || store.tokenMint !== deployment.mint) {
+      throw new Error('Invalid OFT store account.')
+    }
+
+    const peerConfig = parsePeerConfig(peerAccount, programAddress)
+
+    if (!peerConfig) {
+      throw new Error(`OFT peer not configured for destination ${dstEid}.`)
+    }
+
+    const lookupTables = {}
+
+    if (store.alt) {
+      const [table] = await fetchEncodedAccounts(this._account._rpc, [store.alt], { commitment: this._account._commitment })
+
+      if (!table.exists || table.programAddress !== ADDRESS_LOOKUP_TABLE_PROGRAM_ADDRESS) {
+        throw new Error('Invalid OFT address lookup table account.')
+      }
+
+      lookupTables[store.alt] = getAddressLookupTableDecoder().decode(table.data).addresses
+    }
+
+    return { programAddress, oftStore, peer, credits, store, peerConfig, lookupTables }
+  }
+
+  /**
+   * Resolves the endpoint and message library accounts an oapp forwards to the layerzero endpoint's 'quote' instruction,
+   * or to its 'send' instruction when a payer is given.
+   *
+   * Port of `SendHelper.getQuoteAccounts` and `SendHelper.getSendAccounts` from `@layerzerolabs/lz-solana-sdk-v2`,
+   * restricted to the ULN message library.
    *
    * @private
    * @param {SolanaAddress} endpoint - The layerzero endpoint program.
    * @param {SolanaAddress} sender - The oapp sending the message (the oft store).
    * @param {number} dstEid - The destination endpoint id.
    * @param {Uint8Array} receiver - The remote peer, encoded as 32 bytes.
-   * @returns {Promise<import('@solana/instructions').AccountMeta[]>} The accounts, all read-only.
+   * @param {SolanaAddress} [payer] - The account paying the messaging fee, for a send.
+   * @returns {Promise<import('@solana/instructions').AccountMeta[]>} The accounts.
    * @throws {Error} If the route is not configured or uses a message library other than the ULN.
    */
-  async _getQuoteSendAccounts (endpoint, sender, dstEid, receiver) {
+  async _getEndpointAccounts (endpoint, sender, dstEid, receiver, payer) {
     const eid = getU32Encoder({ endian: Endian.Big }).encode(dstEid)
 
     const senderSeed = getAddressEncoder().encode(sender)
@@ -477,33 +476,36 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       getProgramDerivedAddress({ programAddress: LAYERZERO_ULN_PROGRAM, seeds: ['SendConfig', eid] })
     ])
 
-    const { value: [sendLibraryConfigInfo, defaultSendLibraryConfigInfo, sendConfigInfo, defaultSendConfigInfo] } = await this._account._rpc
-      .getMultipleAccounts([sendLibraryConfig, defaultSendLibraryConfig, sendConfig, defaultSendConfig], { encoding: 'base64', commitment: this._account._commitment })
-      .send()
+    const [sendLibraryConfigAccount, defaultSendLibraryConfigAccount, sendConfigAccount, defaultSendConfigAccount, ulnAccount] =
+      await fetchEncodedAccounts(this._account._rpc, [sendLibraryConfig, defaultSendLibraryConfig, sendConfig, defaultSendConfig, uln], { commitment: this._account._commitment })
 
-    if (!sendLibraryConfigInfo || !defaultSendLibraryConfigInfo) {
+    // The decoders check each account's anchor discriminator; owners are checked here.
+    if ([sendLibraryConfigAccount, defaultSendLibraryConfigAccount].some((account) => !account.exists || account.programAddress !== endpoint)) {
       throw new Error('LayerZero send library not initialized.')
     }
 
-    let { messageLib } = sendLibraryConfigDecoder.decode(getBase64Encoder().encode(sendLibraryConfigInfo.data[0]))
+    let { messageLib } = sendLibraryConfigDecoder.decode(sendLibraryConfigAccount.data)
 
     // LayerZero marks unset addresses with the all-zero key (PublicKey.default), which is the system program address.
     if (messageLib === SYSTEM_PROGRAM_ADDRESS) {
-      messageLib = sendLibraryConfigDecoder.decode(getBase64Encoder().encode(defaultSendLibraryConfigInfo.data[0])).messageLib
+      messageLib = sendLibraryConfigDecoder.decode(defaultSendLibraryConfigAccount.data).messageLib
     }
 
     if (messageLib !== uln) {
       throw new Error('Unsupported LayerZero message library.')
     }
 
-    if (!defaultSendConfigInfo) {
+    // The oapp send config is optional; the default send config and the ULN settings are not.
+    const ulnAccounts = [defaultSendConfigAccount, ulnAccount, ...(sendConfigAccount.exists ? [sendConfigAccount] : [])]
+
+    if (ulnAccounts.some((account) => !account.exists || account.programAddress !== LAYERZERO_ULN_PROGRAM)) {
       throw new Error('LayerZero ULN send config not initialized.')
     }
 
     // An oapp send config overrides the default executor when set, and the default dvn sets when non-empty.
-    const defaults = ulnSendConfigDecoder.decode(getBase64Encoder().encode(defaultSendConfigInfo.data[0]))
+    const defaults = ulnSendConfigDecoder.decode(defaultSendConfigAccount.data)
 
-    const custom = sendConfigInfo && ulnSendConfigDecoder.decode(getBase64Encoder().encode(sendConfigInfo.data[0]))
+    const custom = sendConfigAccount.exists ? ulnSendConfigDecoder.decode(sendConfigAccount.data) : null
 
     const executor = custom && custom.executor !== SYSTEM_PROGRAM_ADDRESS ? custom.executor : defaults.executor
 
@@ -513,46 +515,75 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
     const workers = [executor, ...requiredDvns, ...optionalDvns]
 
-    const { value: workerInfos } = await this._account._rpc.getMultipleAccounts(workers, { encoding: 'base64', commitment: this._account._commitment }).send()
+    const workerConfigs = await fetchEncodedAccounts(this._account._rpc, workers, { commitment: this._account._commitment })
 
-    const priceFeeds = workerInfos.map((info, i) => {
-      if (!info) {
+    const priceFeeds = workerConfigs.map((config, i) => {
+      if (!config.exists) {
         throw new Error(`LayerZero worker ${workers[i]} not initialized.`)
       }
 
-      return (i === 0 ? executorConfigDecoder : dvnConfigDecoder).decode(getBase64Encoder().encode(info.data[0])).priceFeed
+      return (i === 0 ? executorConfigDecoder : dvnConfigDecoder).decode(config.data).priceFeed
     })
 
-    const { value: priceFeedInfos } = await this._account._rpc.getMultipleAccounts(priceFeeds, { encoding: 'base64', commitment: this._account._commitment }).send()
+    const priceFeedAccounts = await fetchEncodedAccounts(this._account._rpc, priceFeeds, { commitment: this._account._commitment })
 
-    const [[sendLibraryInfo], [endpointSettings], [nonce]] = await Promise.all([
+    const [[sendLibraryInfo], [endpointSettings], [nonce], [endpointEventAuthority], [ulnEventAuthority]] = await Promise.all([
       getProgramDerivedAddress({ programAddress: endpoint, seeds: ['MessageLib', getAddressEncoder().encode(uln)] }),
       getProgramDerivedAddress({ programAddress: endpoint, seeds: ['Endpoint'] }),
-      getProgramDerivedAddress({ programAddress: endpoint, seeds: ['Nonce', senderSeed, eid, receiver] })
+      getProgramDerivedAddress({ programAddress: endpoint, seeds: ['Nonce', senderSeed, eid, receiver] }),
+      getProgramDerivedAddress({ programAddress: endpoint, seeds: ['__event_authority'] }),
+      getProgramDerivedAddress({ programAddress: LAYERZERO_ULN_PROGRAM, seeds: ['__event_authority'] })
     ])
 
-    // Each worker contributes its program, its config, and its price feed's program and config.
+    // Each worker contributes its program, its config (written to when charged on a send), and its price feed's program and config.
     const workerAccounts = workers.flatMap((worker, i) => {
-      if (!priceFeedInfos[i]) {
+      if (!priceFeedAccounts[i].exists) {
         throw new Error(`LayerZero price feed ${priceFeeds[i]} not initialized.`)
       }
 
-      return [workerInfos[i].owner, worker, priceFeedInfos[i].owner, priceFeeds[i]]
+      return [[workerConfigs[i].programAddress], [worker, payer ? AccountRole.WRITABLE : AccountRole.READONLY], [priceFeedAccounts[i].programAddress], [priceFeeds[i]]]
     })
 
-    return [
-      endpoint,
-      LAYERZERO_ULN_PROGRAM,
-      sendLibraryConfig,
-      defaultSendLibraryConfig,
-      sendLibraryInfo,
-      endpointSettings,
-      nonce,
-      uln,
-      sendConfig,
-      defaultSendConfig,
-      ...workerAccounts
-    ].map((address) => ({ address, role: AccountRole.READONLY }))
+    // The ULN pays its protocol fee to the treasury when one is set, and otherwise takes its own program as a placeholder.
+    const treasury = payer && ulnSettingsDecoder.decode(ulnAccount.data).treasury?.nativeReceiver
+
+    const accounts = payer
+      ? [
+          [endpoint],
+          [sender],
+          [LAYERZERO_ULN_PROGRAM],
+          [sendLibraryConfig],
+          [defaultSendLibraryConfig],
+          [sendLibraryInfo],
+          [endpointSettings],
+          [nonce, AccountRole.WRITABLE],
+          [endpointEventAuthority],
+          [endpoint],
+          [uln],
+          [sendConfig],
+          [defaultSendConfig],
+          [payer, AccountRole.WRITABLE_SIGNER],
+          treasury ? [treasury, AccountRole.WRITABLE] : [LAYERZERO_ULN_PROGRAM],
+          [SYSTEM_PROGRAM_ADDRESS],
+          [ulnEventAuthority],
+          [LAYERZERO_ULN_PROGRAM],
+          ...workerAccounts
+        ]
+      : [
+          [endpoint],
+          [LAYERZERO_ULN_PROGRAM],
+          [sendLibraryConfig],
+          [defaultSendLibraryConfig],
+          [sendLibraryInfo],
+          [endpointSettings],
+          [nonce],
+          [uln],
+          [sendConfig],
+          [defaultSendConfig],
+          ...workerAccounts
+        ]
+
+    return accounts.map(([account, role = AccountRole.READONLY]) => ({ address: account, role }))
   }
 
   /**
@@ -564,11 +595,44 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
    * @param {bigint} nativeFee - The layerzero native fee to pay, in lamports.
    * @param {string} sender - The sender's address.
    * @returns {Promise<import('@solana/instructions').Instruction[]>} The instructions.
+   * @see https://github.com/LayerZero-Labs/usdt-native-mesh/blob/main/programs/oft/src/instructions/send.rs
    */
   async _buildOftSendInstructions (deployment, sendParam, nativeFee, sender) {
-    // TODO: build the 'send' instruction (sender token account, mint, oft store, peer, endpoint and messagelib
-    // remaining accounts), prepending a compute budget instruction if needed.
-    throw new Error('Not implemented: _buildOftSendInstructions.')
+    const { programAddress, oftStore, peer, credits, store, peerConfig, lookupTables } = await this._getOftRoute(deployment, sendParam.dstEid)
+
+    const signer = address(sender)
+
+    const [[tokenSource], [eventAuthority], remainingAccounts] = await Promise.all([
+      findAssociatedTokenPda({ mint: store.tokenMint, owner: signer, tokenProgram: TOKEN_PROGRAM_ADDRESS }),
+      getProgramDerivedAddress({ programAddress, seeds: ['__event_authority'] }),
+      this._getEndpointAccounts(store.endpointProgram, oftStore, sendParam.dstEid, peerConfig.peerAddress, signer)
+    ])
+
+    const instruction = {
+      programAddress,
+      accounts: [
+        [signer, AccountRole.READONLY_SIGNER],
+        [peer],
+        [oftStore, AccountRole.WRITABLE],
+        [credits, AccountRole.WRITABLE],
+        [tokenSource, AccountRole.WRITABLE],
+        [store.tokenEscrow, AccountRole.WRITABLE],
+        [store.tokenMint],
+        [TOKEN_PROGRAM_ADDRESS],
+        [eventAuthority],
+        [programAddress]
+      ].map(([account, role = AccountRole.READONLY]) => ({ address: account, role })).concat(remainingAccounts),
+      data: sendEncoder.encode({ ...sendParam, nativeFee, lzTokenFee: 0n })
+    }
+
+    // A send references more accounts than fit in a transaction, so the non-signers are loaded through the store's lookup table.
+    return compressTransactionMessageUsingAddressLookupTables(
+      appendTransactionMessageInstructions(
+        [getSetComputeUnitLimitInstruction({ units: SEND_COMPUTE_UNIT_LIMIT }), instruction],
+        createTransactionMessage({ version: 0 })
+      ),
+      lookupTables
+    ).instructions
   }
 
   /**
@@ -604,25 +668,17 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
         throw new Error(`Invalid recipient address for target chain '${targetChain}': ZERO_ADDRESS.`)
       }
 
-      return this._padBytes32(bytes)
+      // Left-pad the 21-byte payload to 32 bytes.
+      return padLeftEncoder(getBytesEncoder(), 32 - bytes.length).encode(bytes)
     }
 
     if (type === 'evm') {
       this._assertValidRecipient(validateEVMAddress(recipient), targetChain)
 
-      return this._padBytes32(getBase16Encoder().encode(recipient.slice(2).toLowerCase()))
+      return addressToBytes32(recipient)
     }
 
     throw new Error(`Target chain '${targetChain}' not supported.`)
-  }
-
-  /** @private */
-  _padBytes32 (bytes) {
-    const result = new Uint8Array(32)
-
-    result.set(bytes, 32 - bytes.length)
-
-    return result
   }
 
   /** @private */

@@ -1,19 +1,19 @@
 /**
  * Parses a Legacy Mesh oft store account.
  *
- * @param {AccountInfo | null} account - The account.
+ * @param {MaybeEncodedAccount} account - The account.
  * @param {Address} programAddress - The oft program expected to own it.
  * @returns {OftStore | null} The oft store, or null if the account is missing, has another owner or discriminator, or is truncated.
  */
-export function parseOftStore(account: AccountInfo | null, programAddress: Address): OftStore | null;
+export function parseOftStore(account: MaybeEncodedAccount, programAddress: Address): OftStore | null;
 /**
  * Parses a Legacy Mesh oft peer config account.
  *
- * @param {AccountInfo | null} account - The account.
+ * @param {MaybeEncodedAccount} account - The account.
  * @param {Address} programAddress - The oft program expected to own it.
  * @returns {PeerConfig | null} The peer config, or null if the account is missing, has another owner or discriminator, or is truncated.
  */
-export function parsePeerConfig(account: AccountInfo | null, programAddress: Address): PeerConfig | null;
+export function parsePeerConfig(account: MaybeEncodedAccount, programAddress: Address): PeerConfig | null;
 /**
  * Derives an oft program's peer config account for a destination.
  *
@@ -29,70 +29,96 @@ export function getPeerAddress(programAddress: Address, dstEid: number): Promise
  * @returns {Promise<Address>} The credits address.
  */
 export function getCreditsAddress(programAddress: Address): Promise<Address>;
+export const quoteSendEncoder: import("@solana/codecs").VariableSizeEncoder<{
+    discriminator: void;
+    dstEid: number | bigint;
+    composeMsg: any;
+    to: Uint8Array<ArrayBufferLike> | import("@solana/codecs").ReadonlyUint8Array;
+    minAmountLD: number | bigint;
+    amountLD: number | bigint;
+    extraOptions: Uint8Array<ArrayBufferLike> | import("@solana/codecs").ReadonlyUint8Array;
+    payInLzToken: boolean;
+}>;
+export const sendEncoder: import("@solana/codecs").VariableSizeEncoder<{
+    discriminator: void;
+    dstEid: number | bigint;
+    composeMsg: any;
+    to: Uint8Array<ArrayBufferLike> | import("@solana/codecs").ReadonlyUint8Array;
+    minAmountLD: number | bigint;
+    lzTokenFee: number | bigint;
+    amountLD: number | bigint;
+    extraOptions: Uint8Array<ArrayBufferLike> | import("@solana/codecs").ReadonlyUint8Array;
+    nativeFee: number | bigint;
+}>;
+export const messagingFeeDecoder: import("@solana/codecs").FixedSizeDecoder<{
+    nativeFee: bigint;
+    lzTokenFee: bigint;
+}>;
+export const ulnSettingsDecoder: import("@solana/codecs").VariableSizeDecoder<{
+    discriminator: void;
+    eid: number;
+    treasury: {
+        admin: import("@solana/addresses").Address<string>;
+        nativeReceiver: import("@solana/addresses").Address<string>;
+        nativeFeeBps: bigint;
+        lzToken: {
+            receiver: import("@solana/addresses").Address<string>;
+            fee: bigint;
+        };
+    };
+    endpoint: import("@solana/addresses").Address<string>;
+    bump: number;
+    endpointProgram: import("@solana/addresses").Address<string>;
+    admin: import("@solana/addresses").Address<string>;
+}>;
 export const sendLibraryConfigDecoder: import("@solana/codecs").FixedSizeDecoder<{
-    discriminator: import("@solana/codecs").ReadonlyUint8Array;
+    discriminator: void;
     messageLib: import("@solana/addresses").Address<string>;
 }>;
 export const ulnSendConfigDecoder: import("@solana/codecs").VariableSizeDecoder<{
-    discriminator: import("@solana/codecs").ReadonlyUint8Array;
+    discriminator: void;
     bump: number;
     requiredDvns: import("@solana/addresses").Address<string>[];
     confirmations: bigint;
-    maxMessageSize: number;
     optionalDvnCount: number;
+    maxMessageSize: number;
     requiredDvnCount: number;
     optionalDvnThreshold: number;
     optionalDvns: import("@solana/addresses").Address<string>[];
     executor: import("@solana/addresses").Address<string>;
 }>;
 export const executorConfigDecoder: import("@solana/codecs").VariableSizeDecoder<{
-    discriminator: import("@solana/codecs").ReadonlyUint8Array;
+    discriminator: void;
     bump: number;
     priceFeed: import("@solana/addresses").Address<string>;
     executors: import("@solana/addresses").Address<string>[];
     owner: import("@solana/addresses").Address<string>;
-    paused: boolean;
     denyList: import("@solana/addresses").Address<string>[];
+    paused: boolean;
     allowList: import("@solana/addresses").Address<string>[];
     admins: import("@solana/addresses").Address<string>[];
     msglibs: import("@solana/addresses").Address<string>[];
     defaultMultiplierBps: number;
 }>;
 export const dvnConfigDecoder: import("@solana/codecs").VariableSizeDecoder<{
-    discriminator: import("@solana/codecs").ReadonlyUint8Array;
+    discriminator: void;
     vid: number;
     priceFeed: import("@solana/addresses").Address<string>;
     denyList: import("@solana/addresses").Address<string>[];
     bump: number;
-    msglibs: import("@solana/addresses").Address<string>[];
     quorum: number;
+    msglibs: import("@solana/addresses").Address<string>[];
     signers: import("@solana/codecs").ReadonlyUint8Array[];
     allowList: import("@solana/addresses").Address<string>[];
     paused: boolean;
     admins: import("@solana/addresses").Address<string>[];
 }>;
 export type Address = import("@solana/addresses").Address;
-/**
- * An account as returned by the rpc's 'getMultipleAccounts' with base64 encoding.
- */
-export type AccountInfo = {
-    /**
-     * - The program owning the account.
-     */
-    owner: Address;
-    /**
-     * - The base64-encoded account data and its encoding.
-     */
-    data: readonly [string, string];
-};
+export type MaybeEncodedAccount = import("@solana/accounts").MaybeEncodedAccount;
 /**
  * A Legacy Mesh oft store account.
  */
 export type OftStore = {
-    /**
-     * - The anchor account discriminator.
-     */
-    discriminator: Uint8Array;
     /**
      * - The token mint.
      */
@@ -142,10 +168,6 @@ export type OftStore = {
  * A Legacy Mesh oft peer config account.
  */
 export type PeerConfig = {
-    /**
-     * - The anchor account discriminator.
-     */
-    discriminator: Uint8Array;
     /**
      * - The remote peer, encoded as 32 bytes.
      */

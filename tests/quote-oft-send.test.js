@@ -18,18 +18,19 @@ import { readFileSync } from 'node:fs'
 import { beforeEach, describe, expect, jest, test } from '@jest/globals'
 import { Options } from '@layerzerolabs/lz-v2-utilities'
 import { getAddressLookupTableDecoder } from '@solana-program/address-lookup-table'
+import { parseBase64RpcAccount } from '@solana/accounts'
 import { getAddressEncoder, getProgramDerivedAddress } from '@solana/addresses'
 import { getBase64Encoder } from '@solana/codecs'
 import { AccountRole } from '@solana/instructions'
-import { decompileTransactionMessage, getCompiledTransactionMessageDecoder } from '@solana/transaction-messages'
-import { getTransactionDecoder } from '@solana/transactions'
+import { appendTransactionMessageInstructions, createTransactionMessage, decompileTransactionMessage, getCompiledTransactionMessageDecoder, setTransactionMessageFeePayer } from '@solana/transaction-messages'
+import { compileTransaction, getBase64EncodedWireTransaction, getTransactionDecoder } from '@solana/transactions'
 
 import Usdt0ProtocolSolana from '../index.js'
 import { SOLANA_OFT_DEPLOYMENTS } from '../src/config.js'
 import { parseOftStore, parsePeerConfig } from '../src/layerzero.js'
 
-// Accounts read by a quote to arbitrum, recorded from mainnet, and the route accounts
-// that '@layerzerolabs/lz-solana-sdk-v2' SendHelper.getQuoteAccounts resolved for them.
+// Accounts read by a quote and a send to arbitrum, recorded from mainnet, and the endpoint accounts that
+// '@layerzerolabs/lz-solana-sdk-v2' SendHelper.getQuoteAccounts and getSendAccounts resolved for them (send: [address, role]).
 const FIXTURE = JSON.parse(readFileSync(new URL('./fixtures/mainnet-arbitrum-route.json', import.meta.url), 'utf8'))
 
 const DEPLOYMENT = SOLANA_OFT_DEPLOYMENTS.USDT0
@@ -141,6 +142,17 @@ describe('_quoteOftSend', () => {
     await expect(quote()).rejects.toThrow('Unsupported LayerZero message library.')
   })
 
+  test('rejects a send library config owned by another program', async () => {
+    accounts[SEND_LIBRARY_CONFIG] = { ...accounts[SEND_LIBRARY_CONFIG], owner: PAYER }
+    await expect(quote()).rejects.toThrow('LayerZero send library not initialized.')
+  })
+
+  test('rejects a worker config with another discriminator', async () => {
+    withData(FIXTURE.quoteAccounts[11], data => { data[0] ^= 0xff })
+    await expect(quote()).rejects.toThrow()
+    expect(rpc.simulateTransaction).not.toHaveBeenCalled()
+  })
+
   test('rejects a route with a missing price feed', async () => {
     delete accounts[PRICE_FEED]
     await expect(quote()).rejects.toThrow(`LayerZero price feed ${PRICE_FEED} not initialized.`)
@@ -184,8 +196,95 @@ describe('_quoteOftSend', () => {
   })
 })
 
+describe('_buildOftSendInstructions', () => {
+  const ULN_SETTINGS = FIXTURE.quoteAccounts[7]
+  const TOKEN_SOURCE = 'TB5FCqbNsnuLQgEjUuPaT9qtVPTT4U1A8rvi7qzEj2M'
+  const NATIVE_FEE = 795_116n
+
+  let accounts, protocol
+
+  const build = () => protocol._buildOftSendInstructions(DEPLOYMENT, {
+    dstEid: 30_110,
+    to: protocol._encodeRecipient('arbitrum', '0xa460AEbce0d3A4BecAd8ccf9D6D4861296c503Bd'),
+    amountLD: 1_000_000n,
+    minAmountLD: 999_000n,
+    extraOptions: Options.newOptions().toBytes(),
+    composeMsg: new Uint8Array(),
+    oftCmd: new Uint8Array()
+  }, NATIVE_FEE, PAYER)
+
+  beforeEach(() => {
+    accounts = { ...FIXTURE.accounts }
+    const rpc = {
+      getMultipleAccounts: jest.fn(keys => ({
+        send: async () => ({ value: keys.map(key => accounts[key] ? { ...accounts[key], data: [accounts[key].data, 'base64'] } : null) })
+      }))
+    }
+    protocol = new Usdt0ProtocolSolana({ _rpc: rpc, _commitment: 'confirmed', getAddress: async () => PAYER })
+  })
+
+  test('builds the Legacy Mesh send with the layerzero sdk endpoint accounts', async () => {
+    const [computeBudget, send] = await build()
+
+    expect(computeBudget.programAddress).toBe('ComputeBudget111111111111111111111111111111')
+    expect(Buffer.from(computeBudget.data).toString('hex')).toBe('02801a0600')
+
+    const [credits] = await getProgramDerivedAddress({ programAddress: DEPLOYMENT.programId, seeds: ['Credits'] })
+    const [eventAuthority] = await getProgramDerivedAddress({ programAddress: DEPLOYMENT.programId, seeds: ['__event_authority'] })
+    const { tokenEscrow } = parseOftStore(parseBase64RpcAccount(DEPLOYMENT.oftStore, { ...accounts[DEPLOYMENT.oftStore], data: [accounts[DEPLOYMENT.oftStore].data, 'base64'] }), DEPLOYMENT.programId)
+    expect(send.programAddress).toBe(DEPLOYMENT.programId)
+    expect(send.accounts.map(account => [account.address, account.role])).toEqual([
+      [PAYER, AccountRole.READONLY_SIGNER],
+      [ARBITRUM_PEER, AccountRole.READONLY],
+      [DEPLOYMENT.oftStore, AccountRole.WRITABLE],
+      [credits, AccountRole.WRITABLE],
+      [TOKEN_SOURCE, AccountRole.WRITABLE],
+      [tokenEscrow, AccountRole.WRITABLE],
+      [DEPLOYMENT.mint, AccountRole.READONLY],
+      ['TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', AccountRole.READONLY],
+      [eventAuthority, AccountRole.READONLY],
+      [DEPLOYMENT.programId, AccountRole.READONLY],
+      ...FIXTURE.sendAccounts
+    ])
+    expect(Buffer.from(send.data).toString('hex')).toBe(
+      discriminator('global:send').toString('hex') + '9e750000' +
+      '000000000000000000000000a460aebce0d3a4becad8ccf9d6d4861296c503bd' +
+      '40420f0000000000583e0f000000000002000000000300' + 'ec210c0000000000' + '0000000000000000'
+    )
+  })
+
+  test('loads the non-signer accounts through the store lookup table so the send fits in a transaction', async () => {
+    const instructions = await build()
+    const [, send] = instructions
+
+    expect(send.accounts.filter(account => account.lookupTableAddress === LOOKUP_TABLE).length).toBeGreaterThan(20)
+    expect(send.accounts.filter(account => account.address === PAYER).every(account => !account.lookupTableAddress)).toBe(true)
+
+    const message = setTransactionMessageFeePayer(PAYER, appendTransactionMessageInstructions(instructions, createTransactionMessage({ version: 0 })))
+    expect(getBase64Encoder().encode(getBase64EncodedWireTransaction(compileTransaction(message))).length).toBeLessThanOrEqual(1_232)
+  })
+
+  test('pays the ULN treasury when one is set', async () => {
+    // UlnSettings: discriminator, eid, endpoint, endpoint program, bump and admin take 109 bytes, then Option<Treasury>.
+    const data = Buffer.from(accounts[ULN_SETTINGS].data, 'base64')
+    const treasury = Buffer.from(getAddressEncoder().encode(ARBITRUM_PEER))
+    accounts[ULN_SETTINGS] = {
+      ...accounts[ULN_SETTINGS],
+      data: Buffer.concat([data.subarray(0, 109), Buffer.from([1, 0]), treasury, Buffer.alloc(8), Buffer.from([0])]).toString('base64')
+    }
+
+    const [, send] = await build()
+    expect(send.accounts.slice(10).map(account => [account.address, account.role])[14]).toEqual([ARBITRUM_PEER, AccountRole.WRITABLE])
+  })
+
+  test('rejects an unconfigured destination', async () => {
+    delete accounts[ARBITRUM_PEER]
+    await expect(build()).rejects.toThrow('OFT peer not configured for destination 30110.')
+  })
+})
+
 describe('Legacy Mesh account parsers', () => {
-  const account = key => ({ ...FIXTURE.accounts[key], data: [FIXTURE.accounts[key].data, 'base64'] })
+  const account = (key, data = FIXTURE.accounts[key].data) => parseBase64RpcAccount(key, { ...FIXTURE.accounts[key], data: [data, 'base64'] })
 
   test('parses the mainnet oft store', () => {
     expect(parseOftStore(account(DEPLOYMENT.oftStore), DEPLOYMENT.programId)).toMatchObject({
@@ -204,11 +303,11 @@ describe('Legacy Mesh account parsers', () => {
 
   test('returns null for missing, foreign, mismatched, or truncated accounts', () => {
     const store = account(DEPLOYMENT.oftStore)
-    expect(parseOftStore(null, DEPLOYMENT.programId)).toBeNull()
-    expect(parseOftStore({ ...store, owner: PAYER }, DEPLOYMENT.programId)).toBeNull()
+    expect(parseOftStore(parseBase64RpcAccount(DEPLOYMENT.oftStore, null), DEPLOYMENT.programId)).toBeNull()
+    expect(parseOftStore({ ...store, programAddress: PAYER }, DEPLOYMENT.programId)).toBeNull()
     expect(parseOftStore(account(ARBITRUM_PEER), DEPLOYMENT.programId)).toBeNull()
-    const truncated = Buffer.from(store.data[0], 'base64').subarray(0, 100).toString('base64')
-    expect(parseOftStore({ ...store, data: [truncated, 'base64'] }, DEPLOYMENT.programId)).toBeNull()
+    const truncated = Buffer.from(FIXTURE.accounts[DEPLOYMENT.oftStore].data, 'base64').subarray(0, 100).toString('base64')
+    expect(parseOftStore(account(DEPLOYMENT.oftStore, truncated), DEPLOYMENT.programId)).toBeNull()
     expect(parsePeerConfig(store, DEPLOYMENT.programId)).toBeNull()
   })
 })

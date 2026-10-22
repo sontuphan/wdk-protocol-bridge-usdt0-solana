@@ -18,36 +18,37 @@ import { getAddressDecoder, getProgramDerivedAddress } from '@solana/addresses'
 import {
   Endian,
   addDecoderSizePrefix,
+  addEncoderSizePrefix,
   fixDecoderSize,
+  fixEncoderSize,
   getArrayDecoder,
-  getBase16Decoder,
-  getBase64Encoder,
+  getBase16Encoder,
   getBooleanDecoder,
+  getBooleanEncoder,
   getBytesDecoder,
+  getBytesEncoder,
+  getConstantDecoder,
+  getConstantEncoder,
   getNullableDecoder,
+  getOptionEncoder,
   getStructDecoder,
+  getStructEncoder,
   getU16Decoder,
   getU32Decoder,
   getU32Encoder,
   getU64Decoder,
-  getU8Decoder
+  getU64Encoder,
+  getU8Decoder,
+  transformEncoder
 } from '@solana/codecs'
 
 /** @typedef {import('@solana/addresses').Address} Address */
-
-/**
- * An account as returned by the rpc's 'getMultipleAccounts' with base64 encoding.
- *
- * @typedef {Object} AccountInfo
- * @property {Address} owner - The program owning the account.
- * @property {readonly [string, string]} data - The base64-encoded account data and its encoding.
- */
+/** @typedef {import('@solana/accounts').MaybeEncodedAccount} MaybeEncodedAccount */
 
 /**
  * A Legacy Mesh oft store account.
  *
  * @typedef {Object} OftStore
- * @property {Uint8Array} discriminator - The anchor account discriminator.
  * @property {Address} tokenMint - The token mint.
  * @property {Address} tokenEscrow - The escrow holding the tvl and fees.
  * @property {Address} endpointProgram - The layerzero endpoint program.
@@ -65,27 +66,44 @@ import {
  * A Legacy Mesh oft peer config account.
  *
  * @typedef {Object} PeerConfig
- * @property {Uint8Array} discriminator - The anchor account discriminator.
  * @property {Uint8Array} peerAddress - The remote peer, encoded as 32 bytes.
  * @property {{ withdrawRemote: Uint8Array, sendOft: Uint8Array, sendCredits: Uint8Array, sendOftAndCall: Uint8Array }} enforcedOptions - The enforced options per message type.
  * @property {number} bump - The pda bump.
  */
 
-// Anchor discriminators: the first 8 bytes of sha256('account:<name>').
+// Anchor discriminators: the first 8 bytes of sha256('account:<name>') or sha256('global:<instruction>').
 const OFT_STORE_DISCRIMINATOR = 'c3d76886b9c3f072'
 
 const PEER_CONFIG_DISCRIMINATOR = 'b59d56c621c15ecb'
 
+const QUOTE_SEND_DISCRIMINATOR = 'cf0031d6a0d34cd3'
+
+const SEND_DISCRIMINATOR = '66fb14bb414b0c45'
+
+const ULN_SETTINGS_DISCRIMINATOR = 'e2c764fd2673a79a'
+
+const SEND_LIBRARY_CONFIG_DISCRIMINATOR = '3dee1f48fb7542b0'
+
+const ULN_SEND_CONFIG_DISCRIMINATOR = '5bdd878983c7ae19'
+
+const EXECUTOR_CONFIG_DISCRIMINATOR = '8611e2180aad9d4e'
+
+const DVN_CONFIG_DISCRIMINATOR = '31512162eaa85d49'
+
 const addressesDecoder = getArrayDecoder(getAddressDecoder())
 
-const discriminatorDecoder = fixDecoderSize(getBytesDecoder(), 8)
+// Borsh Vec<u8>.
+const bytesEncoder = addEncoderSizePrefix(getBytesEncoder(), getU32Encoder())
 
-const optionsDecoder = addDecoderSizePrefix(getBytesDecoder(), getU32Decoder())
+const bytesDecoder = addDecoderSizePrefix(getBytesDecoder(), getU32Decoder())
+
+// An empty compose message is encoded as None.
+const composeMsgEncoder = transformEncoder(getOptionEncoder(bytesEncoder), (composeMsg) => composeMsg.length ? composeMsg : null)
 
 // Legacy Mesh account layouts.
 // @see https://github.com/LayerZero-Labs/usdt-native-mesh/tree/4ce9a592e178a333a451a3d464cee3bd782fbaf1/programs/oft/src/state
 const oftStoreDecoder = getStructDecoder([
-  ['discriminator', discriminatorDecoder],
+  ['discriminator', getConstantDecoder(getBase16Encoder().encode(OFT_STORE_DISCRIMINATOR))],
   ['tokenMint', getAddressDecoder()],
   ['tokenEscrow', getAddressDecoder()],
   ['endpointProgram', getAddressDecoder()],
@@ -100,25 +118,71 @@ const oftStoreDecoder = getStructDecoder([
 ])
 
 const peerConfigDecoder = getStructDecoder([
-  ['discriminator', discriminatorDecoder],
+  ['discriminator', getConstantDecoder(getBase16Encoder().encode(PEER_CONFIG_DISCRIMINATOR))],
   ['peerAddress', fixDecoderSize(getBytesDecoder(), 32)],
   ['enforcedOptions', getStructDecoder([
-    ['withdrawRemote', optionsDecoder],
-    ['sendOft', optionsDecoder],
-    ['sendCredits', optionsDecoder],
-    ['sendOftAndCall', optionsDecoder]
+    ['withdrawRemote', bytesDecoder],
+    ['sendOft', bytesDecoder],
+    ['sendCredits', bytesDecoder],
+    ['sendOftAndCall', bytesDecoder]
   ])],
   ['bump', getU8Decoder()]
 ])
 
+// Legacy Mesh 'quote_send' arguments, borsh-encoded.
+export const quoteSendEncoder = getStructEncoder([
+  ['discriminator', getConstantEncoder(getBase16Encoder().encode(QUOTE_SEND_DISCRIMINATOR))],
+  ['dstEid', getU32Encoder()],
+  ['to', fixEncoderSize(getBytesEncoder(), 32)],
+  ['amountLD', getU64Encoder()],
+  ['minAmountLD', getU64Encoder()],
+  ['extraOptions', bytesEncoder],
+  ['composeMsg', composeMsgEncoder],
+  ['payInLzToken', getBooleanEncoder()]
+])
+
+// Legacy Mesh 'send' arguments, borsh-encoded.
+export const sendEncoder = getStructEncoder([
+  ['discriminator', getConstantEncoder(getBase16Encoder().encode(SEND_DISCRIMINATOR))],
+  ['dstEid', getU32Encoder()],
+  ['to', fixEncoderSize(getBytesEncoder(), 32)],
+  ['amountLD', getU64Encoder()],
+  ['minAmountLD', getU64Encoder()],
+  ['extraOptions', bytesEncoder],
+  ['composeMsg', composeMsgEncoder],
+  ['nativeFee', getU64Encoder()],
+  ['lzTokenFee', getU64Encoder()]
+])
+
+// Legacy Mesh MessagingFee, returned by 'quote_send'.
+export const messagingFeeDecoder = getStructDecoder([
+  ['nativeFee', getU64Decoder()],
+  ['lzTokenFee', getU64Decoder()]
+])
+
 // Account layouts from the layerzero idls, decoded up to the last field read; trailing fields are ignored.
+export const ulnSettingsDecoder = getStructDecoder([
+  ['discriminator', getConstantDecoder(getBase16Encoder().encode(ULN_SETTINGS_DISCRIMINATOR))],
+  ['eid', getU32Decoder()],
+  ['endpoint', getAddressDecoder()],
+  ['endpointProgram', getAddressDecoder()],
+  ['bump', getU8Decoder()],
+  ['admin', getAddressDecoder()],
+  ['treasury', getNullableDecoder(getStructDecoder([
+    ['admin', getNullableDecoder(getAddressDecoder())],
+    ['nativeReceiver', getAddressDecoder()],
+    ['nativeFeeBps', getU64Decoder()],
+    ['lzToken', getNullableDecoder(getStructDecoder([['receiver', getAddressDecoder()], ['fee', getU64Decoder()]]))]
+  ]))]
+])
+
 export const sendLibraryConfigDecoder = getStructDecoder([
-  ['discriminator', discriminatorDecoder],
+  ['discriminator', getConstantDecoder(getBase16Encoder().encode(SEND_LIBRARY_CONFIG_DISCRIMINATOR))],
   ['messageLib', getAddressDecoder()]
 ])
 
 export const ulnSendConfigDecoder = getStructDecoder([
-  ['discriminator', discriminatorDecoder],
+  ['discriminator', getConstantDecoder(getBase16Encoder().encode(ULN_SEND_CONFIG_DISCRIMINATOR))],
   ['bump', getU8Decoder()],
   ['confirmations', getU64Decoder()],
   ['requiredDvnCount', getU8Decoder()],
@@ -131,7 +195,7 @@ export const ulnSendConfigDecoder = getStructDecoder([
 ])
 
 export const executorConfigDecoder = getStructDecoder([
-  ['discriminator', discriminatorDecoder],
+  ['discriminator', getConstantDecoder(getBase16Encoder().encode(EXECUTOR_CONFIG_DISCRIMINATOR))],
   ['bump', getU8Decoder()],
   ['owner', getAddressDecoder()],
   ['allowList', addressesDecoder],
@@ -145,7 +209,7 @@ export const executorConfigDecoder = getStructDecoder([
 ])
 
 export const dvnConfigDecoder = getStructDecoder([
-  ['discriminator', discriminatorDecoder],
+  ['discriminator', getConstantDecoder(getBase16Encoder().encode(DVN_CONFIG_DISCRIMINATOR))],
   ['vid', getU32Decoder()],
   ['bump', getU8Decoder()],
   ['signers', getArrayDecoder(fixDecoderSize(getBytesDecoder(), 64))],
@@ -161,25 +225,19 @@ export const dvnConfigDecoder = getStructDecoder([
 /**
  * Parses a Legacy Mesh oft store account.
  *
- * @param {AccountInfo | null} account - The account.
+ * @param {MaybeEncodedAccount} account - The account.
  * @param {Address} programAddress - The oft program expected to own it.
  * @returns {OftStore | null} The oft store, or null if the account is missing, has another owner or discriminator, or is truncated.
  */
 export function parseOftStore (account, programAddress) {
-  if (!account || account.owner !== programAddress) {
-    return null
-  }
-
-  const data = getBase64Encoder().encode(account.data[0])
-
-  if (getBase16Decoder().decode(data.slice(0, 8)) !== OFT_STORE_DISCRIMINATOR) {
+  if (!account.exists || account.programAddress !== programAddress) {
     return null
   }
 
   try {
-    return oftStoreDecoder.decode(data)
+    return oftStoreDecoder.decode(account.data)
   } catch {
-    // Truncated account.
+    // Another discriminator, or a truncated account.
     return null
   }
 }
@@ -187,25 +245,19 @@ export function parseOftStore (account, programAddress) {
 /**
  * Parses a Legacy Mesh oft peer config account.
  *
- * @param {AccountInfo | null} account - The account.
+ * @param {MaybeEncodedAccount} account - The account.
  * @param {Address} programAddress - The oft program expected to own it.
  * @returns {PeerConfig | null} The peer config, or null if the account is missing, has another owner or discriminator, or is truncated.
  */
 export function parsePeerConfig (account, programAddress) {
-  if (!account || account.owner !== programAddress) {
-    return null
-  }
-
-  const data = getBase64Encoder().encode(account.data[0])
-
-  if (getBase16Decoder().decode(data.slice(0, 8)) !== PEER_CONFIG_DISCRIMINATOR) {
+  if (!account.exists || account.programAddress !== programAddress) {
     return null
   }
 
   try {
-    return peerConfigDecoder.decode(data)
+    return peerConfigDecoder.decode(account.data)
   } catch {
-    // Truncated account.
+    // Another discriminator, or a truncated account.
     return null
   }
 }
