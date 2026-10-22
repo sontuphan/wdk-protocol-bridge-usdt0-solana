@@ -106,6 +106,20 @@ describe('Usdt0ProtocolSolana', () => {
       await expect(protocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: SOLANA_ADDRESS, amount: 100 }))
         .rejects.toThrow(`Token '${SOLANA_ADDRESS}' not supported on this chain.`)
     })
+
+    test.each([0, -1, 1.5, 2 ** 53, 0n, 2n ** 64n, '100'])('should throw for the invalid amount %p before any rpc call', async (amount) => {
+      await expect(protocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount }))
+        .rejects.toThrow('The bridge amount must be a positive integer in base units that fits in 64 bits.')
+
+      expect(protocol._getOftRoute).not.toHaveBeenCalled()
+    })
+
+    test('should accept the largest u64 amount as a bigint', async () => {
+      await protocol.quoteBridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 2n ** 64n - 1n })
+
+      const [, sendParam] = protocol._buildOftSendInstructions.mock.calls[0]
+      expect(sendParam.amountLD).toBe(2n ** 64n - 1n)
+    })
   })
 
   describe('quoteBridge', () => {

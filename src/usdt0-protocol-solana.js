@@ -67,8 +67,9 @@ import {
 
 /** @typedef {import('@solana/addresses').Address} SolanaAddress */
 
-// Sends measured 277k to 281k compute units on the mainnet routes; the limit leaves headroom for fee config changes.
 const SEND_COMPUTE_UNIT_LIMIT = 400_000
+
+const U64_MAX = 0xffffffffffffffffn
 
 /**
  * A chain supported by the protocol, in the canonical WDK swidge shape.
@@ -175,7 +176,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       throw new Error('The wallet must be connected to a provider in order to perform bridge operations.')
     }
 
-    const { tx, bridgeFee } = await this._getBridgeTransaction({ ...options, amount: BigInt(options.amount) })
+    const { tx, bridgeFee } = await this._getBridgeTransaction(options)
 
     const { fee } = await this._account.quoteSendTransaction(tx)
 
@@ -199,7 +200,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       throw new Error('The wallet must be connected to a provider in order to quote bridge operations.')
     }
 
-    const { tx, bridgeFee } = await this._getBridgeTransaction({ ...options, amount: BigInt(options.amount) })
+    const { tx, bridgeFee } = await this._getBridgeTransaction(options)
 
     const { fee } = await this._account.quoteSendTransaction(tx)
 
@@ -289,7 +290,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
   }
 
   /** @private */
-  async _getBridgeTransaction ({ targetChain, recipient, token, amount, dstEid }) {
+  async _getBridgeTransaction ({ targetChain, recipient, token, amount: rawAmount, dstEid }) {
     if (!BLOCKCHAINS[targetChain]) {
       throw new Error(`Target chain '${targetChain}' not supported.`)
     }
@@ -303,6 +304,13 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     if (!deployment) {
       throw new Error(`Token '${token}' not supported on this chain.`)
     }
+
+    // Numbers above 2^53 cannot hold an exact base-unit amount.
+    if (!(typeof rawAmount === 'bigint' || Number.isSafeInteger(rawAmount)) || rawAmount <= 0 || BigInt(rawAmount) > U64_MAX) {
+      throw new Error('The bridge amount must be a positive integer in base units that fits in 64 bits.')
+    }
+
+    const amount = BigInt(rawAmount)
 
     const to = this._encodeRecipient(targetChain, recipient)
 
