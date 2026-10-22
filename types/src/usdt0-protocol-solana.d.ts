@@ -116,15 +116,19 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
      */
     private _quoteOftSend;
     /**
-     * Fetches accounts through the wallet's rpc.
+     * Resolves the endpoint and message library accounts an oapp forwards to the layerzero endpoint's 'quote' instruction.
+     *
+     * Port of `SendHelper.getQuoteAccounts` from `@layerzerolabs/lz-solana-sdk-v2`, restricted to the ULN message library.
      *
      * @private
-     * @param {SolanaAddress[]} addresses - The account addresses.
-     * @returns {Promise<(AccountInfo | null)[]>} The accounts, or null for missing ones.
+     * @param {SolanaAddress} endpoint - The layerzero endpoint program.
+     * @param {SolanaAddress} sender - The oapp sending the message (the oft store).
+     * @param {number} dstEid - The destination endpoint id.
+     * @param {Uint8Array} receiver - The remote peer, encoded as 32 bytes.
+     * @returns {Promise<import('@solana/instructions').AccountMeta[]>} The accounts, all read-only.
+     * @throws {Error} If the route is not configured or uses a message library other than the ULN.
      */
-    private _getAccounts;
-    /** @private */
-    private _getCommitment;
+    private _getQuoteSendAccounts;
     /**
      * Builds the oft program's 'send' instruction(s).
      *
@@ -155,7 +159,6 @@ export type BridgeResult = import("@tetherto/wdk-wallet/protocols").BridgeResult
 export type IWalletAccount = import("@tetherto/wdk-wallet").IWalletAccount;
 export type IWalletAccountReadOnly = import("@tetherto/wdk-wallet").IWalletAccountReadOnly;
 export type SolanaAddress = import("@solana/addresses").Address;
-export type AccountInfo = import("./layerzero.js").AccountInfo;
 /**
  * A chain supported by the protocol, in the canonical WDK swidge shape.
  *

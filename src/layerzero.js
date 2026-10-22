@@ -14,14 +14,14 @@
 
 'use strict'
 
-import { SYSTEM_PROGRAM_ADDRESS } from '@solana-program/system'
-import { getAddressDecoder, getAddressEncoder, getProgramDerivedAddress } from '@solana/addresses'
+import { getAddressDecoder, getProgramDerivedAddress } from '@solana/addresses'
 import {
   Endian,
   addDecoderSizePrefix,
   fixDecoderSize,
   getArrayDecoder,
   getBase16Decoder,
+  getBase64Encoder,
   getBooleanDecoder,
   getBytesDecoder,
   getNullableDecoder,
@@ -32,20 +32,16 @@ import {
   getU64Decoder,
   getU8Decoder
 } from '@solana/codecs'
-import { AccountRole } from '@solana/instructions'
-
-import { LAYERZERO_ULN_PROGRAM } from './config.js'
 
 /** @typedef {import('@solana/addresses').Address} Address */
-/** @typedef {import('@solana/instructions').AccountMeta} AccountMeta */
 
 /**
+ * An account as returned by the rpc's 'getMultipleAccounts' with base64 encoding.
+ *
  * @typedef {Object} AccountInfo
  * @property {Address} owner - The program owning the account.
- * @property {Uint8Array} data - The account data.
+ * @property {readonly [string, string]} data - The base64-encoded account data and its encoding.
  */
-
-/** @typedef {(addresses: Address[]) => Promise<(AccountInfo | null)[]>} GetAccounts */
 
 /**
  * A Legacy Mesh oft store account.
@@ -116,12 +112,12 @@ const peerConfigDecoder = getStructDecoder([
 ])
 
 // Account layouts from the layerzero idls, decoded up to the last field read; trailing fields are ignored.
-const sendLibraryConfigDecoder = getStructDecoder([
+export const sendLibraryConfigDecoder = getStructDecoder([
   ['discriminator', discriminatorDecoder],
   ['messageLib', getAddressDecoder()]
 ])
 
-const ulnSendConfigDecoder = getStructDecoder([
+export const ulnSendConfigDecoder = getStructDecoder([
   ['discriminator', discriminatorDecoder],
   ['bump', getU8Decoder()],
   ['confirmations', getU64Decoder()],
@@ -134,7 +130,7 @@ const ulnSendConfigDecoder = getStructDecoder([
   ['executor', getAddressDecoder()]
 ])
 
-const executorConfigDecoder = getStructDecoder([
+export const executorConfigDecoder = getStructDecoder([
   ['discriminator', discriminatorDecoder],
   ['bump', getU8Decoder()],
   ['owner', getAddressDecoder()],
@@ -148,7 +144,7 @@ const executorConfigDecoder = getStructDecoder([
   ['priceFeed', getAddressDecoder()]
 ])
 
-const dvnConfigDecoder = getStructDecoder([
+export const dvnConfigDecoder = getStructDecoder([
   ['discriminator', discriminatorDecoder],
   ['vid', getU32Decoder()],
   ['bump', getU8Decoder()],
@@ -170,12 +166,18 @@ const dvnConfigDecoder = getStructDecoder([
  * @returns {OftStore | null} The oft store, or null if the account is missing, has another owner or discriminator, or is truncated.
  */
 export function parseOftStore (account, programAddress) {
-  if (!account || account.owner !== programAddress || getBase16Decoder().decode(account.data.slice(0, 8)) !== OFT_STORE_DISCRIMINATOR) {
+  if (!account || account.owner !== programAddress) {
+    return null
+  }
+
+  const data = getBase64Encoder().encode(account.data[0])
+
+  if (getBase16Decoder().decode(data.slice(0, 8)) !== OFT_STORE_DISCRIMINATOR) {
     return null
   }
 
   try {
-    return oftStoreDecoder.decode(account.data)
+    return oftStoreDecoder.decode(data)
   } catch {
     // Truncated account.
     return null
@@ -190,12 +192,18 @@ export function parseOftStore (account, programAddress) {
  * @returns {PeerConfig | null} The peer config, or null if the account is missing, has another owner or discriminator, or is truncated.
  */
 export function parsePeerConfig (account, programAddress) {
-  if (!account || account.owner !== programAddress || getBase16Decoder().decode(account.data.slice(0, 8)) !== PEER_CONFIG_DISCRIMINATOR) {
+  if (!account || account.owner !== programAddress) {
+    return null
+  }
+
+  const data = getBase64Encoder().encode(account.data[0])
+
+  if (getBase16Decoder().decode(data.slice(0, 8)) !== PEER_CONFIG_DISCRIMINATOR) {
     return null
   }
 
   try {
-    return peerConfigDecoder.decode(account.data)
+    return peerConfigDecoder.decode(data)
   } catch {
     // Truncated account.
     return null
@@ -225,108 +233,4 @@ export async function getCreditsAddress (programAddress) {
   const [credits] = await getProgramDerivedAddress({ programAddress, seeds: ['Credits'] })
 
   return credits
-}
-
-/**
- * Resolves the endpoint and message library accounts an oapp forwards to the layerzero endpoint's 'quote' instruction.
- *
- * Port of `SendHelper.getQuoteAccounts` from `@layerzerolabs/lz-solana-sdk-v2`, restricted to the ULN message library.
- *
- * @param {GetAccounts} getAccounts - Fetches accounts, returning null for missing ones.
- * @param {Address} endpoint - The layerzero endpoint program.
- * @param {Address} sender - The oapp sending the message (the oft store).
- * @param {number} dstEid - The destination endpoint id.
- * @param {Uint8Array} receiver - The remote peer, encoded as 32 bytes.
- * @returns {Promise<AccountMeta[]>} The accounts, all read-only.
- * @throws {Error} If the route is not configured or uses a message library other than the ULN.
- */
-export async function getQuoteSendAccounts (getAccounts, endpoint, sender, dstEid, receiver) {
-  // Endpoint ids are big-endian u32 seeds.
-  const eid = getU32Encoder({ endian: Endian.Big }).encode(dstEid)
-
-  const senderSeed = getAddressEncoder().encode(sender)
-
-  const [[sendLibraryConfig], [defaultSendLibraryConfig], [uln], [sendConfig], [defaultSendConfig]] = await Promise.all([
-    getProgramDerivedAddress({ programAddress: endpoint, seeds: ['SendLibraryConfig', senderSeed, eid] }),
-    getProgramDerivedAddress({ programAddress: endpoint, seeds: ['SendLibraryConfig', eid] }),
-    getProgramDerivedAddress({ programAddress: LAYERZERO_ULN_PROGRAM, seeds: ['MessageLib'] }),
-    getProgramDerivedAddress({ programAddress: LAYERZERO_ULN_PROGRAM, seeds: ['SendConfig', eid, senderSeed] }),
-    getProgramDerivedAddress({ programAddress: LAYERZERO_ULN_PROGRAM, seeds: ['SendConfig', eid] })
-  ])
-
-  const [sendLibraryConfigInfo, defaultSendLibraryConfigInfo, sendConfigInfo, defaultSendConfigInfo] =
-    await getAccounts([sendLibraryConfig, defaultSendLibraryConfig, sendConfig, defaultSendConfig])
-
-  if (!sendLibraryConfigInfo || !defaultSendLibraryConfigInfo) {
-    throw new Error('LayerZero send library not initialized.')
-  }
-
-  let { messageLib } = sendLibraryConfigDecoder.decode(sendLibraryConfigInfo.data)
-
-  // LayerZero marks unset addresses with the all-zero key (PublicKey.default), which is the system program address.
-  if (messageLib === SYSTEM_PROGRAM_ADDRESS) {
-    messageLib = sendLibraryConfigDecoder.decode(defaultSendLibraryConfigInfo.data).messageLib
-  }
-
-  if (messageLib !== uln) {
-    throw new Error('Unsupported LayerZero message library.')
-  }
-
-  if (!defaultSendConfigInfo) {
-    throw new Error('LayerZero ULN send config not initialized.')
-  }
-
-  // An oapp send config overrides the default executor when set, and the default dvn sets when non-empty.
-  const defaults = ulnSendConfigDecoder.decode(defaultSendConfigInfo.data)
-
-  const custom = sendConfigInfo && ulnSendConfigDecoder.decode(sendConfigInfo.data)
-
-  const executor = custom && custom.executor !== SYSTEM_PROGRAM_ADDRESS ? custom.executor : defaults.executor
-
-  const [requiredDvns, optionalDvns] = ['requiredDvns', 'optionalDvns'].map((key) =>
-    custom?.[key].length ? custom[key].filter((dvn) => dvn !== SYSTEM_PROGRAM_ADDRESS) : defaults[key]
-  )
-
-  const workers = [executor, ...requiredDvns, ...optionalDvns]
-
-  const workerInfos = await getAccounts(workers)
-
-  const priceFeeds = workerInfos.map((info, i) => {
-    if (!info) {
-      throw new Error(`LayerZero worker ${workers[i]} not initialized.`)
-    }
-
-    return (i === 0 ? executorConfigDecoder : dvnConfigDecoder).decode(info.data).priceFeed
-  })
-
-  const priceFeedInfos = await getAccounts(priceFeeds)
-
-  const [[sendLibraryInfo], [endpointSettings], [nonce]] = await Promise.all([
-    getProgramDerivedAddress({ programAddress: endpoint, seeds: ['MessageLib', getAddressEncoder().encode(uln)] }),
-    getProgramDerivedAddress({ programAddress: endpoint, seeds: ['Endpoint'] }),
-    getProgramDerivedAddress({ programAddress: endpoint, seeds: ['Nonce', senderSeed, eid, receiver] })
-  ])
-
-  // Each worker contributes its program, its config, and its price feed's program and config.
-  const workerAccounts = workers.flatMap((worker, i) => {
-    if (!priceFeedInfos[i]) {
-      throw new Error(`LayerZero price feed ${priceFeeds[i]} not initialized.`)
-    }
-
-    return [workerInfos[i].owner, worker, priceFeedInfos[i].owner, priceFeeds[i]]
-  })
-
-  return [
-    endpoint,
-    LAYERZERO_ULN_PROGRAM,
-    sendLibraryConfig,
-    defaultSendLibraryConfig,
-    sendLibraryInfo,
-    endpointSettings,
-    nonce,
-    uln,
-    sendConfig,
-    defaultSendConfig,
-    ...workerAccounts
-  ].map((address) => ({ address, role: AccountRole.READONLY }))
 }

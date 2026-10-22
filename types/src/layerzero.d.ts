@@ -29,33 +29,62 @@ export function getPeerAddress(programAddress: Address, dstEid: number): Promise
  * @returns {Promise<Address>} The credits address.
  */
 export function getCreditsAddress(programAddress: Address): Promise<Address>;
-/**
- * Resolves the endpoint and message library accounts an oapp forwards to the layerzero endpoint's 'quote' instruction.
- *
- * Port of `SendHelper.getQuoteAccounts` from `@layerzerolabs/lz-solana-sdk-v2`, restricted to the ULN message library.
- *
- * @param {GetAccounts} getAccounts - Fetches accounts, returning null for missing ones.
- * @param {Address} endpoint - The layerzero endpoint program.
- * @param {Address} sender - The oapp sending the message (the oft store).
- * @param {number} dstEid - The destination endpoint id.
- * @param {Uint8Array} receiver - The remote peer, encoded as 32 bytes.
- * @returns {Promise<AccountMeta[]>} The accounts, all read-only.
- * @throws {Error} If the route is not configured or uses a message library other than the ULN.
- */
-export function getQuoteSendAccounts(getAccounts: GetAccounts, endpoint: Address, sender: Address, dstEid: number, receiver: Uint8Array): Promise<AccountMeta[]>;
+export const sendLibraryConfigDecoder: import("@solana/codecs").FixedSizeDecoder<{
+    discriminator: import("@solana/codecs").ReadonlyUint8Array;
+    messageLib: import("@solana/addresses").Address<string>;
+}>;
+export const ulnSendConfigDecoder: import("@solana/codecs").VariableSizeDecoder<{
+    discriminator: import("@solana/codecs").ReadonlyUint8Array;
+    bump: number;
+    requiredDvns: import("@solana/addresses").Address<string>[];
+    confirmations: bigint;
+    maxMessageSize: number;
+    optionalDvnCount: number;
+    requiredDvnCount: number;
+    optionalDvnThreshold: number;
+    optionalDvns: import("@solana/addresses").Address<string>[];
+    executor: import("@solana/addresses").Address<string>;
+}>;
+export const executorConfigDecoder: import("@solana/codecs").VariableSizeDecoder<{
+    discriminator: import("@solana/codecs").ReadonlyUint8Array;
+    bump: number;
+    priceFeed: import("@solana/addresses").Address<string>;
+    executors: import("@solana/addresses").Address<string>[];
+    owner: import("@solana/addresses").Address<string>;
+    paused: boolean;
+    denyList: import("@solana/addresses").Address<string>[];
+    allowList: import("@solana/addresses").Address<string>[];
+    admins: import("@solana/addresses").Address<string>[];
+    msglibs: import("@solana/addresses").Address<string>[];
+    defaultMultiplierBps: number;
+}>;
+export const dvnConfigDecoder: import("@solana/codecs").VariableSizeDecoder<{
+    discriminator: import("@solana/codecs").ReadonlyUint8Array;
+    vid: number;
+    priceFeed: import("@solana/addresses").Address<string>;
+    denyList: import("@solana/addresses").Address<string>[];
+    bump: number;
+    msglibs: import("@solana/addresses").Address<string>[];
+    quorum: number;
+    signers: import("@solana/codecs").ReadonlyUint8Array[];
+    allowList: import("@solana/addresses").Address<string>[];
+    paused: boolean;
+    admins: import("@solana/addresses").Address<string>[];
+}>;
 export type Address = import("@solana/addresses").Address;
-export type AccountMeta = import("@solana/instructions").AccountMeta;
+/**
+ * An account as returned by the rpc's 'getMultipleAccounts' with base64 encoding.
+ */
 export type AccountInfo = {
     /**
      * - The program owning the account.
      */
     owner: Address;
     /**
-     * - The account data.
+     * - The base64-encoded account data and its encoding.
      */
-    data: Uint8Array;
+    data: readonly [string, string];
 };
-export type GetAccounts = (addresses: Address[]) => Promise<(AccountInfo | null)[]>;
 /**
  * A Legacy Mesh oft store account.
  */

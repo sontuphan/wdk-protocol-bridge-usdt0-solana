@@ -185,7 +185,7 @@ describe('_quoteOftSend', () => {
 })
 
 describe('Legacy Mesh account parsers', () => {
-  const account = key => ({ ...FIXTURE.accounts[key], data: getBase64Encoder().encode(FIXTURE.accounts[key].data) })
+  const account = key => ({ ...FIXTURE.accounts[key], data: [FIXTURE.accounts[key].data, 'base64'] })
 
   test('parses the mainnet oft store', () => {
     expect(parseOftStore(account(DEPLOYMENT.oftStore), DEPLOYMENT.programId)).toMatchObject({
@@ -207,7 +207,8 @@ describe('Legacy Mesh account parsers', () => {
     expect(parseOftStore(null, DEPLOYMENT.programId)).toBeNull()
     expect(parseOftStore({ ...store, owner: PAYER }, DEPLOYMENT.programId)).toBeNull()
     expect(parseOftStore(account(ARBITRUM_PEER), DEPLOYMENT.programId)).toBeNull()
-    expect(parseOftStore({ ...store, data: store.data.slice(0, 100) }, DEPLOYMENT.programId)).toBeNull()
+    const truncated = Buffer.from(store.data[0], 'base64').subarray(0, 100).toString('base64')
+    expect(parseOftStore({ ...store, data: [truncated, 'base64'] }, DEPLOYMENT.programId)).toBeNull()
     expect(parsePeerConfig(store, DEPLOYMENT.programId)).toBeNull()
   })
 })
