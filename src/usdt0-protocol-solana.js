@@ -67,7 +67,6 @@ import {
 
 /** @typedef {import('@solana/addresses').Address} SolanaAddress */
 /** @typedef {import('@solana/codecs').ReadonlyUint8Array} ReadonlyUint8Array */
-/** @typedef {import('@solana/instructions').Instruction} Instruction */
 
 const SEND_COMPUTE_UNIT_LIMIT = 400_000
 
@@ -340,7 +339,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
     const { nativeFee: bridgeFee } = await this._quoteOftSend(route, sendParam)
 
-    const sender = await this._account.getAddress()
+    const sender = address(await this._account.getAddress())
 
     const instructions = await this._buildOftSendInstructions(route, sendParam, bridgeFee, sender)
 
@@ -349,17 +348,10 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     return { tx, bridgeFee }
   }
 
-  /**
-   * Quotes the layerzero messaging fee of an oft send by simulating the oft program's 'quote_send' instruction.
-   *
-   * @private
-   * @param {OftRoute} route - The oft accounts for the destination.
-   * @param {OftSendParam} sendParam - The send parameters.
-   * @returns {Promise<{ nativeFee: bigint, lzTokenFee: bigint }>} The messaging fee, in lamports.
-   * @throws {Error} If the route or the simulation result is invalid.
-   * @see https://github.com/LayerZero-Labs/usdt-native-mesh/blob/main/programs/oft/src/instructions/quote_send.rs
-   */
+  /** @private */
   async _quoteOftSend (route, sendParam) {
+    // @see https://github.com/LayerZero-Labs/usdt-native-mesh/blob/main/programs/oft/src/instructions/quote_send.rs
+
     if (sendParam.to.length !== 32 || sendParam.oftCmd.length !== 0) {
       throw new Error('Invalid OFT recipient or unsupported OFT command.')
     }
@@ -387,7 +379,6 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       encoding: 'base64', commitment: this._account._commitment, sigVerify: false, replaceRecentBlockhash: true
     }).send()
 
-    // The simulation needs an existing fee payer, so an unfunded wallet cannot be quoted.
     if (value.err === 'AccountNotFound') {
       throw new Error('Cannot quote from an unfunded account: fund it with SOL first.')
     }
@@ -408,15 +399,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     return messagingFeeDecoder.decode(bytes)
   }
 
-  /**
-   * Fetches and validates the oft accounts a quote or a send to a destination reads.
-   *
-   * @private
-   * @param {typeof SOLANA_OFT_DEPLOYMENTS[keyof typeof SOLANA_OFT_DEPLOYMENTS]} deployment - The oft deployment.
-   * @param {number} dstEid - The destination endpoint id.
-   * @returns {Promise<OftRoute>} The oft accounts.
-   * @throws {Error} If the store, the peer, or the lookup table is invalid.
-   */
+  /** @private */
   async _getOftRoute (deployment, dstEid) {
     const programAddress = address(deployment.programId)
 
@@ -454,23 +437,11 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     return { programAddress, oftStore, peer, credits, store, peerConfig, lookupTables }
   }
 
-  /**
-   * Resolves the endpoint and message library accounts an oapp forwards to the layerzero endpoint's 'quote' instruction,
-   * or to its 'send' instruction when a payer is given.
-   *
-   * Port of `SendHelper.getQuoteAccounts` and `SendHelper.getSendAccounts` from `@layerzerolabs/lz-solana-sdk-v2`,
-   * restricted to the ULN message library.
-   *
-   * @private
-   * @param {SolanaAddress} endpoint - The layerzero endpoint program.
-   * @param {SolanaAddress} sender - The oapp sending the message (the oft store).
-   * @param {number} dstEid - The destination endpoint id.
-   * @param {ReadonlyUint8Array} receiver - The remote peer, encoded as 32 bytes.
-   * @param {SolanaAddress} [payer] - The account paying the messaging fee, for a send.
-   * @returns {Promise<import('@solana/instructions').AccountMeta[]>} The accounts.
-   * @throws {Error} If the route is not configured or uses a message library other than the ULN.
-   */
+  /** @private */
   async _getEndpointAccounts (endpoint, sender, dstEid, receiver, payer) {
+    // Port of SendHelper.getQuoteAccounts and SendHelper.getSendAccounts from @layerzerolabs/lz-solana-sdk-v2,
+    // restricted to the ULN message library: quote accounts without a payer, send accounts with one.
+
     const eid = getU32Encoder({ endian: Endian.Big }).encode(dstEid)
 
     const senderSeed = getAddressEncoder().encode(sender)
@@ -503,7 +474,6 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       throw new Error('Unsupported LayerZero message library.')
     }
 
-    // The oapp send config is optional; the default send config and the ULN settings are not.
     if (!defaultSendConfigAccount.exists || !ulnAccount.exists ||
         [defaultSendConfigAccount, ulnAccount, ...(sendConfigAccount.exists ? [sendConfigAccount] : [])].some((account) => account.programAddress !== LAYERZERO_ULN_PROGRAM)) {
       throw new Error('LayerZero ULN send config not initialized.')
@@ -527,7 +497,11 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
         throw new Error(`LayerZero worker ${workers[i]} not initialized.`)
       }
 
-      return { program: config.programAddress, priceFeed: decodeAccount(config, i === 0 ? executorConfigDecoder : dvnConfigDecoder).data.priceFeed }
+      const { priceFeed } = i === 0
+        ? decodeAccount(config, executorConfigDecoder).data
+        : decodeAccount(config, dvnConfigDecoder).data
+
+      return { program: config.programAddress, priceFeed }
     })
 
     const priceFeedAccounts = await fetchEncodedAccounts(this._account._rpc, workerConfigs.map(({ priceFeed }) => priceFeed), { commitment: this._account._commitment })
@@ -595,42 +569,35 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     return accounts.map(([account, role = AccountRole.READONLY]) => ({ address: account, role }))
   }
 
-  /**
-   * Builds the oft program's 'send' instruction(s).
-   *
-   * @private
-   * @param {OftRoute} route - The oft accounts for the destination.
-   * @param {OftSendParam} sendParam - The send parameters.
-   * @param {bigint} nativeFee - The layerzero native fee to pay, in lamports.
-   * @param {string} sender - The sender's address.
-   * @returns {Promise<readonly Instruction[]>} The instructions.
-   * @see https://github.com/LayerZero-Labs/usdt-native-mesh/blob/main/programs/oft/src/instructions/send.rs
-   */
+  /** @private */
   async _buildOftSendInstructions (route, sendParam, nativeFee, sender) {
+    // @see https://github.com/LayerZero-Labs/usdt-native-mesh/blob/main/programs/oft/src/instructions/send.rs
+
     const { programAddress, oftStore, peer, credits, store, peerConfig, lookupTables } = route
 
-    const signer = address(sender)
-
     const [[tokenSource], [eventAuthority], remainingAccounts] = await Promise.all([
-      findAssociatedTokenPda({ mint: store.tokenMint, owner: signer, tokenProgram: TOKEN_PROGRAM_ADDRESS }),
+      findAssociatedTokenPda({ mint: store.tokenMint, owner: sender, tokenProgram: TOKEN_PROGRAM_ADDRESS }),
       getProgramDerivedAddress({ programAddress, seeds: ['__event_authority'] }),
-      this._getEndpointAccounts(store.endpointProgram, oftStore, sendParam.dstEid, peerConfig.peerAddress, signer)
+      this._getEndpointAccounts(store.endpointProgram, oftStore, sendParam.dstEid, peerConfig.peerAddress, sender)
     ])
+
+    /** @type {Array<[SolanaAddress, AccountRole?]>} */
+    const accounts = [
+      [sender, AccountRole.READONLY_SIGNER],
+      [peer],
+      [oftStore, AccountRole.WRITABLE],
+      [credits, AccountRole.WRITABLE],
+      [tokenSource, AccountRole.WRITABLE],
+      [store.tokenEscrow, AccountRole.WRITABLE],
+      [store.tokenMint],
+      [TOKEN_PROGRAM_ADDRESS],
+      [eventAuthority],
+      [programAddress]
+    ]
 
     const instruction = {
       programAddress,
-      accounts: /** @type {Array<[SolanaAddress, AccountRole?]>} */ ([
-        [signer, AccountRole.READONLY_SIGNER],
-        [peer],
-        [oftStore, AccountRole.WRITABLE],
-        [credits, AccountRole.WRITABLE],
-        [tokenSource, AccountRole.WRITABLE],
-        [store.tokenEscrow, AccountRole.WRITABLE],
-        [store.tokenMint],
-        [TOKEN_PROGRAM_ADDRESS],
-        [eventAuthority],
-        [programAddress]
-      ]).map(([account, role = AccountRole.READONLY]) => ({ address: account, role })).concat(remainingAccounts),
+      accounts: accounts.map(([account, role = AccountRole.READONLY]) => ({ address: account, role })).concat(remainingAccounts),
       data: sendEncoder.encode({ ...sendParam, nativeFee, lzTokenFee: 0n })
     }
 
@@ -644,14 +611,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     ).instructions
   }
 
-  /**
-   * Encodes a recipient address of the target chain as 32 bytes, left-padded with zeros.
-   *
-   * @private
-   * @param {string} targetChain - The target chain.
-   * @param {string} recipient - The recipient's address.
-   * @returns {ReadonlyUint8Array} The encoded address.
-   */
+  /** @private */
   _encodeRecipient (targetChain, recipient) {
     const { type } = BLOCKCHAINS[targetChain]
 
@@ -677,7 +637,6 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
         throw new Error(`Invalid recipient address for target chain '${targetChain}': ZERO_ADDRESS.`)
       }
 
-      // Left-pad the 21-byte payload to 32 bytes.
       return padLeftEncoder(getBytesEncoder(), 32 - bytes.length).encode(bytes)
     }
 

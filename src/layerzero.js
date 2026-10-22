@@ -98,7 +98,6 @@ const bytesEncoder = addEncoderSizePrefix(getBytesEncoder(), getU32Encoder())
 
 const bytesDecoder = addDecoderSizePrefix(getBytesDecoder(), getU32Decoder())
 
-// An empty compose message is encoded as None.
 const composeMsgEncoder = transformEncoder(getOptionEncoder(bytesEncoder), (composeMsg) => composeMsg.length ? composeMsg : null)
 
 // Legacy Mesh account layouts.
@@ -130,7 +129,6 @@ const peerConfigDecoder = getStructDecoder([
   ['bump', getU8Decoder()]
 ])
 
-// Legacy Mesh 'quote_send' arguments, borsh-encoded.
 export const quoteSendEncoder = getStructEncoder([
   ['discriminator', getConstantEncoder(getBase16Encoder().encode(QUOTE_SEND_DISCRIMINATOR))],
   ['dstEid', getU32Encoder()],
@@ -142,7 +140,6 @@ export const quoteSendEncoder = getStructEncoder([
   ['payInLzToken', getBooleanEncoder()]
 ])
 
-// Legacy Mesh 'send' arguments, borsh-encoded.
 export const sendEncoder = getStructEncoder([
   ['discriminator', getConstantEncoder(getBase16Encoder().encode(SEND_DISCRIMINATOR))],
   ['dstEid', getU32Encoder()],
@@ -155,7 +152,6 @@ export const sendEncoder = getStructEncoder([
   ['lzTokenFee', getU64Encoder()]
 ])
 
-// Legacy Mesh MessagingFee, returned by 'quote_send'.
 export const messagingFeeDecoder = getStructDecoder([
   ['nativeFee', getU64Decoder()],
   ['lzTokenFee', getU64Decoder()]
@@ -238,7 +234,6 @@ export function parseOftStore (account, programAddress) {
   try {
     return oftStoreDecoder.decode(account.data)
   } catch {
-    // Another discriminator, or a truncated account.
     return null
   }
 }
@@ -258,7 +253,6 @@ export function parsePeerConfig (account, programAddress) {
   try {
     return peerConfigDecoder.decode(account.data)
   } catch {
-    // Another discriminator, or a truncated account.
     return null
   }
 }
