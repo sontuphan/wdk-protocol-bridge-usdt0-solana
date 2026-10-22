@@ -26,9 +26,15 @@
     "test:coverage": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --coverage"
   },
   "dependencies": {
+    "@layerzerolabs/lz-v2-utilities": "3.0.168",
+    "@solana-program/address-lookup-table": "0.9.0",
+    "@solana-program/compute-budget": "0.10.0",
+    "@solana-program/system": "0.9.0",
     "@solana/addresses": "3.0.3",
     "@solana/codecs": "3.0.3",
+    "@solana/instructions": "3.0.3",
     "@solana/transaction-messages": "3.0.3",
+    "@solana/transactions": "3.0.3",
     "@tetherto/wdk-utils": "1.0.0-beta.12",
     "@tetherto/wdk-wallet": "1.0.0-beta.22",
     "@tetherto/wdk-wallet-solana": "1.0.0-beta.18",

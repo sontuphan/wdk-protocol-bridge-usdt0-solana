@@ -17,17 +17,67 @@
 import { BridgeProtocol } from '@tetherto/wdk-wallet/protocols'
 import { validateEVMAddress, validateTonAddress, validateTronAddress } from '@tetherto/wdk-utils'
 
-import { getBase16Encoder, getBase58Encoder } from '@solana/codecs'
-import { appendTransactionMessageInstructions, createTransactionMessage } from '@solana/transaction-messages'
+import { Options } from '@layerzerolabs/lz-v2-utilities'
+
+import { ADDRESS_LOOKUP_TABLE_PROGRAM_ADDRESS, getAddressLookupTableDecoder } from '@solana-program/address-lookup-table'
+import { MAX_COMPUTE_UNIT_LIMIT, getSetComputeUnitLimitInstruction } from '@solana-program/compute-budget'
+import { address } from '@solana/addresses'
+import {
+  addEncoderSizePrefix,
+  fixEncoderSize,
+  getBase16Encoder,
+  getBase58Encoder,
+  getBase64Encoder,
+  getBooleanEncoder,
+  getBytesEncoder,
+  getOptionEncoder,
+  getStructDecoder,
+  getStructEncoder,
+  getU32Encoder,
+  getU64Decoder,
+  getU64Encoder
+} from '@solana/codecs'
+import { AccountRole } from '@solana/instructions'
+import {
+  appendTransactionMessageInstructions,
+  compressTransactionMessageUsingAddressLookupTables,
+  createTransactionMessage,
+  setTransactionMessageFeePayer
+} from '@solana/transaction-messages'
+import { compileTransaction, getBase64EncodedWireTransaction } from '@solana/transactions'
 import { Address } from '@ton/core'
 
 import { FEE_TOLERANCE, SOURCE_CHAIN, SOLANA_OFT_DEPLOYMENTS, BLOCKCHAINS, TOKENS } from './config.js'
+import { getCreditsAddress, getPeerAddress, getQuoteSendAccounts, parseOftStore, parsePeerConfig } from './layerzero.js'
 
 /** @typedef {import('@tetherto/wdk-wallet/protocols').BridgeProtocolConfig} BridgeProtocolConfig */
 /** @typedef {import('@tetherto/wdk-wallet/protocols').BridgeResult} BridgeResult */
 
 /** @typedef {import('@tetherto/wdk-wallet').IWalletAccount} IWalletAccount */
 /** @typedef {import('@tetherto/wdk-wallet').IWalletAccountReadOnly} IWalletAccountReadOnly */
+
+/** @typedef {import('@solana/addresses').Address} SolanaAddress */
+/** @typedef {import('./layerzero.js').AccountInfo} AccountInfo */
+
+// Anchor instruction discriminator: the first 8 bytes of sha256('global:quote_send').
+const QUOTE_SEND_DISCRIMINATOR = 'cf0031d6a0d34cd3'
+
+// Legacy Mesh 'quote_send' arguments, borsh-encoded.
+const QUOTE_SEND_ENCODER = getStructEncoder([
+  ['discriminator', fixEncoderSize(getBytesEncoder(), 8)],
+  ['dstEid', getU32Encoder()],
+  ['to', fixEncoderSize(getBytesEncoder(), 32)],
+  ['amountLD', getU64Encoder()],
+  ['minAmountLD', getU64Encoder()],
+  ['extraOptions', addEncoderSizePrefix(getBytesEncoder(), getU32Encoder())],
+  ['composeMsg', getOptionEncoder(addEncoderSizePrefix(getBytesEncoder(), getU32Encoder()))],
+  ['payInLzToken', getBooleanEncoder()]
+])
+
+const MESSAGING_FEE_DECODER = getStructDecoder([
+  ['nativeFee', getU64Decoder()],
+  ['lzTokenFee', getU64Decoder()]
+])
 
 /**
  * A chain supported by the protocol, in the canonical WDK swidge shape.
@@ -250,7 +300,22 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       throw new Error(`Token '${token}' not supported on this chain.`)
     }
 
-    const sendParam = this._buildOftSendParam(targetChain, recipient, amount, dstEid)
+    const to = this._encodeRecipient(targetChain, recipient)
+
+    if (to.every((byte) => byte === 0)) {
+      throw new Error(`Invalid recipient address for target chain '${targetChain}': ZERO_ADDRESS.`)
+    }
+
+    /** @type {OftSendParam} */
+    const sendParam = {
+      dstEid: dstEid ?? BLOCKCHAINS[targetChain].eid,
+      to,
+      amountLD: amount,
+      minAmountLD: amount * FEE_TOLERANCE / 1_000n,
+      extraOptions: Options.newOptions().toBytes(),
+      composeMsg: new Uint8Array(),
+      oftCmd: new Uint8Array()
+    }
 
     const { nativeFee: bridgeFee } = await this._quoteOftSend(deployment, sendParam)
 
@@ -281,11 +346,115 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
    * @param {typeof SOLANA_OFT_DEPLOYMENTS[keyof typeof SOLANA_OFT_DEPLOYMENTS]} deployment - The oft deployment.
    * @param {OftSendParam} sendParam - The send parameters.
    * @returns {Promise<{ nativeFee: bigint, lzTokenFee: bigint }>} The messaging fee, in lamports.
+   * @throws {Error} If the deployment, route, or simulation result is invalid.
+   * @see https://github.com/LayerZero-Labs/usdt-native-mesh/blob/main/programs/oft/src/instructions/quote_send.rs
    */
   async _quoteOftSend (deployment, sendParam) {
-    // TODO: build the 'quote_send' instruction (oft store, peer, endpoint and messagelib remaining accounts),
-    // simulate it via this._account._rpc and decode the returned MessagingFee.
-    throw new Error('Not implemented: _quoteOftSend.')
+    if (sendParam.to.length !== 32 || sendParam.oftCmd.length !== 0) {
+      throw new Error('Invalid OFT recipient or unsupported OFT command.')
+    }
+
+    const programAddress = address(deployment.programId)
+
+    const oftStore = address(deployment.oftStore)
+
+    const [peer, credits] = await Promise.all([getPeerAddress(programAddress, sendParam.dstEid), getCreditsAddress(programAddress)])
+
+    const [storeAccount, peerAccount] = await this._getAccounts([oftStore, peer])
+
+    const store = parseOftStore(storeAccount, programAddress)
+
+    if (!store || store.tokenMint !== deployment.mint) {
+      throw new Error('Invalid OFT store account.')
+    }
+
+    const peerConfig = parsePeerConfig(peerAccount, programAddress)
+
+    if (!peerConfig) {
+      throw new Error(`OFT peer not configured for destination ${sendParam.dstEid}.`)
+    }
+
+    const remainingAccounts = await getQuoteSendAccounts(
+      (addresses) => this._getAccounts(addresses), store.endpointProgram, oftStore, sendParam.dstEid, peerConfig.peerAddress
+    )
+
+    const instruction = {
+      programAddress,
+      accounts: [oftStore, credits, peer].map((account) => ({ address: account, role: AccountRole.READONLY })).concat(remainingAccounts),
+      data: QUOTE_SEND_ENCODER.encode({
+        discriminator: getBase16Encoder().encode(QUOTE_SEND_DISCRIMINATOR),
+        dstEid: sendParam.dstEid,
+        to: sendParam.to,
+        amountLD: sendParam.amountLD,
+        minAmountLD: sendParam.minAmountLD,
+        extraOptions: sendParam.extraOptions,
+        composeMsg: sendParam.composeMsg.length ? sendParam.composeMsg : null,
+        payInLzToken: false
+      })
+    }
+
+    const lookupTables = {}
+
+    if (store.alt) {
+      const [table] = await this._getAccounts([store.alt])
+
+      if (!table || table.owner !== ADDRESS_LOOKUP_TABLE_PROGRAM_ADDRESS) {
+        throw new Error('Invalid OFT address lookup table account.')
+      }
+
+      lookupTables[store.alt] = getAddressLookupTableDecoder().decode(table.data).addresses
+    }
+
+    // No lifetime is set: the message compiles with an empty blockhash, which the rpc replaces during the simulation.
+    const message = compressTransactionMessageUsingAddressLookupTables(
+      appendTransactionMessageInstructions(
+        [getSetComputeUnitLimitInstruction({ units: MAX_COMPUTE_UNIT_LIMIT }), instruction],
+        setTransactionMessageFeePayer(address(await this._account.getAddress()), createTransactionMessage({ version: 0 }))
+      ),
+      lookupTables
+    )
+
+    const { value } = await this._account._rpc.simulateTransaction(getBase64EncodedWireTransaction(compileTransaction(message)), {
+      encoding: 'base64', commitment: this._getCommitment(), sigVerify: false, replaceRecentBlockhash: true
+    }).send()
+
+    // The simulation needs an existing fee payer, so an unfunded wallet cannot be quoted.
+    if (value.err === 'AccountNotFound') {
+      throw new Error('Cannot quote from an unfunded account: fund it with SOL first.')
+    }
+
+    if (value.err) {
+      const error = JSON.stringify(value.err, (_, value) => typeof value === 'bigint' ? value.toString() : value)
+      throw new Error(`OFT quote simulation failed: ${error}. ${(value.logs ?? []).join('\n')}`)
+    }
+
+    const returned = value.returnData
+
+    const fee = returned?.data?.[1] === 'base64' ? getBase64Encoder().encode(returned.data[0]) : undefined
+
+    if (returned?.programId !== deployment.programId || fee?.length !== 16) {
+      throw new Error('Invalid OFT quote return data.')
+    }
+
+    return MESSAGING_FEE_DECODER.decode(fee)
+  }
+
+  /**
+   * Fetches accounts through the wallet's rpc.
+   *
+   * @private
+   * @param {SolanaAddress[]} addresses - The account addresses.
+   * @returns {Promise<(AccountInfo | null)[]>} The accounts, or null for missing ones.
+   */
+  async _getAccounts (addresses) {
+    const { value } = await this._account._rpc.getMultipleAccounts(addresses, { encoding: 'base64', commitment: this._getCommitment() }).send()
+
+    return value.map((account) => account && { owner: account.owner, data: getBase64Encoder().encode(account.data[0]) })
+  }
+
+  /** @private */
+  _getCommitment () {
+    return this._account._commitment ?? 'confirmed'
   }
 
   /**
@@ -302,28 +471,6 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     // TODO: build the 'send' instruction (sender token account, mint, oft store, peer, endpoint and messagelib
     // remaining accounts), prepending a compute budget instruction if needed.
     throw new Error('Not implemented: _buildOftSendInstructions.')
-  }
-
-  /**
-   * @private
-   * @returns {OftSendParam}
-   */
-  _buildOftSendParam (targetChain, recipient, amount, dstEidOverride) {
-    const to = this._encodeRecipient(targetChain, recipient)
-
-    if (to.every((byte) => byte === 0)) {
-      throw new Error(`Invalid recipient address for target chain '${targetChain}': ZERO_ADDRESS.`)
-    }
-
-    return {
-      dstEid: dstEidOverride ?? BLOCKCHAINS[targetChain].eid,
-      to,
-      amountLD: amount,
-      minAmountLD: amount * FEE_TOLERANCE / 1_000n,
-      extraOptions: new Uint8Array([0, 3]),
-      composeMsg: new Uint8Array(),
-      oftCmd: new Uint8Array()
-    }
   }
 
   /**

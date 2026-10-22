@@ -116,7 +116,7 @@ describe('Usdt0ProtocolSolana', () => {
   })
 
   describe('recipient encoding', () => {
-    const encode = (targetChain, recipient) => toHex(protocol._buildOftSendParam(targetChain, recipient, 100n).to)
+    const encode = (targetChain, recipient) => toHex(protocol._encodeRecipient(targetChain, recipient))
 
     test('should encode evm addresses', () => {
       expect(encode('arbitrum', EVM_ADDRESS)).toBe('000000000000000000000000a460aebce0d3a4becad8ccf9d6d4861296c503bd')
@@ -135,9 +135,9 @@ describe('Usdt0ProtocolSolana', () => {
         .toThrow("Invalid recipient address for target chain 'arbitrum': INVALID_FORMAT.")
     })
 
-    test('should throw for the zero address', () => {
-      expect(() => encode('arbitrum', '0x0000000000000000000000000000000000000000'))
-        .toThrow("Invalid recipient address for target chain 'arbitrum': ZERO_ADDRESS.")
+    test('should throw for the zero address', async () => {
+      await expect(protocol.quoteBridge({ targetChain: 'arbitrum', recipient: '0x0000000000000000000000000000000000000000', token: MINT, amount: 100 }))
+        .rejects.toThrow("Invalid recipient address for target chain 'arbitrum': ZERO_ADDRESS.")
     })
   })
 

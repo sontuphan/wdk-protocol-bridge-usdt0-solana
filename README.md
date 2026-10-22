@@ -74,9 +74,11 @@ npm run build:types
 
 `SOLANA_OFT_DEPLOYMENTS` in `src/config.js` contains the mainnet Legacy Mesh OFT program, OFT store, and native SPL USDT mint.
 
+Quotes are built with the `@solana/*` v3 packages only. `src/layerzero.js` ports the ULN path of LayerZero's `SendHelper.getQuoteAccounts`, since `@layerzerolabs/lz-solana-sdk-v2` does not load on Bare.
+
 ### Remaining work
 
-- Implement `_quoteOftSend` and `_buildOftSendInstructions` in `src/usdt0-protocol-solana.js`.
+- Implement `_buildOftSendInstructions` in `src/usdt0-protocol-solana.js`.
 
 ## 📜 License
 
