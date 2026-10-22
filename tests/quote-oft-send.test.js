@@ -149,7 +149,7 @@ describe('_quoteOftSend', () => {
 
   test('rejects a worker config with another discriminator', async () => {
     withData(FIXTURE.quoteAccounts[11], data => { data[0] ^= 0xff })
-    await expect(quote()).rejects.toThrow()
+    await expect(quote()).rejects.toThrow(`Failed to decode account data at address: ${FIXTURE.quoteAccounts[11]}`)
     expect(rpc.simulateTransaction).not.toHaveBeenCalled()
   })
 

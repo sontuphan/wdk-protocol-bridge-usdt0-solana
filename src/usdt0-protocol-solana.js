@@ -23,7 +23,7 @@ import { ADDRESS_LOOKUP_TABLE_PROGRAM_ADDRESS, getAddressLookupTableDecoder } fr
 import { MAX_COMPUTE_UNIT_LIMIT, getSetComputeUnitLimitInstruction } from '@solana-program/compute-budget'
 import { SYSTEM_PROGRAM_ADDRESS } from '@solana-program/system'
 import { TOKEN_PROGRAM_ADDRESS, findAssociatedTokenPda } from '@solana-program/token'
-import { fetchEncodedAccounts } from '@solana/accounts'
+import { decodeAccount, fetchEncodedAccounts } from '@solana/accounts'
 import { address, getAddressEncoder, getProgramDerivedAddress } from '@solana/addresses'
 import {
   Endian,
@@ -445,7 +445,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
         throw new Error('Invalid OFT address lookup table account.')
       }
 
-      lookupTables[store.alt] = getAddressLookupTableDecoder().decode(table.data).addresses
+      lookupTables[store.alt] = decodeAccount(table, getAddressLookupTableDecoder()).data.addresses
     }
 
     return { programAddress, oftStore, peer, credits, store, peerConfig, lookupTables }
@@ -483,16 +483,16 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     const [sendLibraryConfigAccount, defaultSendLibraryConfigAccount, sendConfigAccount, defaultSendConfigAccount, ulnAccount] =
       await fetchEncodedAccounts(this._account._rpc, [sendLibraryConfig, defaultSendLibraryConfig, sendConfig, defaultSendConfig, uln], { commitment: this._account._commitment })
 
-    // The decoders check each account's anchor discriminator; owners are checked here.
+    // The decoders check each account's anchor discriminator, and decodeAccount names the account that fails; owners are checked here.
     if ([sendLibraryConfigAccount, defaultSendLibraryConfigAccount].some((account) => !account.exists || account.programAddress !== endpoint)) {
       throw new Error('LayerZero send library not initialized.')
     }
 
-    let { messageLib } = sendLibraryConfigDecoder.decode(sendLibraryConfigAccount.data)
+    let { messageLib } = decodeAccount(sendLibraryConfigAccount, sendLibraryConfigDecoder).data
 
     // LayerZero marks unset addresses with the all-zero key (PublicKey.default), which is the system program address.
     if (messageLib === SYSTEM_PROGRAM_ADDRESS) {
-      messageLib = sendLibraryConfigDecoder.decode(defaultSendLibraryConfigAccount.data).messageLib
+      messageLib = decodeAccount(defaultSendLibraryConfigAccount, sendLibraryConfigDecoder).data.messageLib
     }
 
     if (messageLib !== uln) {
@@ -507,9 +507,9 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     }
 
     // An oapp send config overrides the default executor when set, and the default dvn sets when non-empty.
-    const defaults = ulnSendConfigDecoder.decode(defaultSendConfigAccount.data)
+    const defaults = decodeAccount(defaultSendConfigAccount, ulnSendConfigDecoder).data
 
-    const custom = sendConfigAccount.exists ? ulnSendConfigDecoder.decode(sendConfigAccount.data) : null
+    const custom = sendConfigAccount.exists ? decodeAccount(sendConfigAccount, ulnSendConfigDecoder).data : null
 
     const executor = custom && custom.executor !== SYSTEM_PROGRAM_ADDRESS ? custom.executor : defaults.executor
 
@@ -526,7 +526,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
         throw new Error(`LayerZero worker ${workers[i]} not initialized.`)
       }
 
-      return (i === 0 ? executorConfigDecoder : dvnConfigDecoder).decode(config.data).priceFeed
+      return decodeAccount(config, i === 0 ? executorConfigDecoder : dvnConfigDecoder).data.priceFeed
     })
 
     const priceFeedAccounts = await fetchEncodedAccounts(this._account._rpc, priceFeeds, { commitment: this._account._commitment })
@@ -549,7 +549,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     })
 
     // The ULN pays its protocol fee to the treasury when one is set, and otherwise takes its own program as a placeholder.
-    const treasury = payer && ulnSettingsDecoder.decode(ulnAccount.data).treasury?.nativeReceiver
+    const treasury = payer && decodeAccount(ulnAccount, ulnSettingsDecoder).data.treasury?.nativeReceiver
 
     const accounts = payer
       ? [
