@@ -142,9 +142,10 @@ describe('Usdt0ProtocolSolana', () => {
   })
 
   describe('getSupportedChains', () => {
-    test('should return the configured chains', async () => {
+    test('should return the source chain and the legacy mesh destinations', async () => {
       const chains = await protocol.getSupportedChains()
 
+      expect(chains.map(({ id }) => id)).toEqual(['ethereum', 'arbitrum', 'celo', 'solana', 'ton', 'tron'])
       expect(chains).toContainEqual({ id: 'arbitrum', name: 'Arbitrum', type: 'evm', nativeToken: 'ETH' })
       expect(chains).toContainEqual({ id: 'solana', name: 'Solana', type: 'svm', nativeToken: 'SOL' })
     })

@@ -43,7 +43,7 @@ const { hash, fee, bridgeFee } = await usdt0Bridge.bridge({
 })
 ```
 
-Supported destinations are EVM chains, TON and TRON. `fee` is the Solana transaction fee and `bridgeFee` the LayerZero messaging fee, both in lamports.
+Supported destinations are the USDT0 Legacy Mesh chains: Ethereum, Arbitrum, Celo, TON and TRON. `fee` is the Solana transaction fee and `bridgeFee` the LayerZero messaging fee, both in lamports.
 
 ## 📚 API
 

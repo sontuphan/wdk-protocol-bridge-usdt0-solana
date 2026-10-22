@@ -39,6 +39,11 @@ export const SOLANA_OFT_DEPLOYMENTS = {
  */
 export const LAYERZERO_ULN_PROGRAM = '7a4WjyR8VZ7yZz5XJAKm39BUGn5iT9CKcv2pmG9tdXVH'
 
+/**
+ * The source chain and the destinations of the USDT0 Legacy Mesh, which pools native USDT on each chain.
+ * The Solana Legacy Mesh program has peers for these destinations only.
+ * @see https://github.com/LayerZero-Labs/usdt-native-mesh/blob/main/programs/oft/src/constants.rs
+ */
 export const BLOCKCHAINS = {
   ethereum: {
     name: 'Ethereum',
@@ -53,139 +58,6 @@ export const BLOCKCHAINS = {
     nativeToken: 'ETH',
     eid: 30_110,
     chainId: 42_161
-  },
-  berachain: {
-    name: 'Berachain',
-    type: 'evm',
-    nativeToken: 'BERA',
-    eid: 30_362,
-    chainId: 80_094
-  },
-  conflux: {
-    name: 'Conflux eSpace',
-    type: 'evm',
-    nativeToken: 'CFX',
-    eid: 30_212,
-    chainId: 1_030
-  },
-  corn: {
-    name: 'Corn',
-    type: 'evm',
-    nativeToken: 'BTCN',
-    eid: 30_331,
-    chainId: 21_000_000
-  },
-  flare: {
-    name: 'Flare',
-    type: 'evm',
-    nativeToken: 'FLR',
-    eid: 30_295,
-    chainId: 14
-  },
-  hyperevm: {
-    name: 'HyperEVM',
-    type: 'evm',
-    nativeToken: 'HYPE',
-    eid: 30_367,
-    chainId: 999
-  },
-  ink: {
-    name: 'Ink',
-    type: 'evm',
-    nativeToken: 'ETH',
-    eid: 30_339,
-    chainId: 57_073
-  },
-  mantle: {
-    name: 'Mantle',
-    type: 'evm',
-    nativeToken: 'MNT',
-    eid: 30_181,
-    chainId: 5_000
-  },
-  megaeth: {
-    name: 'MegaETH',
-    type: 'evm',
-    nativeToken: 'ETH',
-    eid: 30_398,
-    chainId: 4_326
-  },
-  monad: {
-    name: 'Monad',
-    type: 'evm',
-    nativeToken: 'MON',
-    eid: 30_390,
-    chainId: 143
-  },
-  morph: {
-    name: 'Morph',
-    type: 'evm',
-    nativeToken: 'ETH',
-    eid: 30_322,
-    chainId: 2_818
-  },
-  optimism: {
-    name: 'Optimism',
-    type: 'evm',
-    nativeToken: 'ETH',
-    eid: 30_111,
-    chainId: 10
-  },
-  plasma: {
-    name: 'Plasma',
-    type: 'evm',
-    nativeToken: 'XPL',
-    eid: 30_383,
-    chainId: 9_745
-  },
-  polygon: {
-    name: 'Polygon',
-    type: 'evm',
-    nativeToken: 'POL',
-    eid: 30_109,
-    chainId: 137
-  },
-  rootstock: {
-    name: 'Rootstock',
-    type: 'evm',
-    nativeToken: 'RBTC',
-    eid: 30_333,
-    chainId: 30
-  },
-  sei: {
-    name: 'Sei',
-    type: 'evm',
-    nativeToken: 'SEI',
-    eid: 30_280,
-    chainId: 1_329
-  },
-  stable: {
-    name: 'Stable',
-    type: 'evm',
-    nativeToken: 'USDT0',
-    eid: 30_396,
-    chainId: 988
-  },
-  unichain: {
-    name: 'Unichain',
-    type: 'evm',
-    nativeToken: 'ETH',
-    eid: 30_320,
-    chainId: 130
-  },
-  xlayer: {
-    name: 'X Layer',
-    type: 'evm',
-    nativeToken: 'OKB',
-    eid: 30_274,
-    chainId: 196
-  },
-  avalanche: {
-    name: 'Avalanche',
-    type: 'evm',
-    nativeToken: 'AVAX',
-    eid: 30_106,
-    chainId: 43_114
   },
   celo: {
     name: 'Celo',
