@@ -358,6 +358,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
     // A gasless account's kora paymaster pays the transaction and fronts the layerzero fee as its fee payer. Matched by shape, not
     // instanceof, so accounts from another copy of wdk-wallet-solana-gasless are recognised too.
+    // TODO: read a public paymasterAddress getter here and in 'bridge' once wdk-wallet-solana-gasless exposes one.
     const payer = this._account._config?.paymasterAddress ? address(this._account._config.paymasterAddress) : sender
 
     const { nativeFee: bridgeFee } = await this._quoteOftSend(route, sendParam, payer)
