@@ -14,6 +14,7 @@
 
 'use strict'
 
+import { decodeAccount } from '@solana/accounts'
 import { getAddressDecoder, getProgramDerivedAddress } from '@solana/addresses'
 import {
   Endian,
@@ -224,18 +225,15 @@ export const dvnConfigDecoder = getStructDecoder([
  *
  * @param {MaybeEncodedAccount} account - The account.
  * @param {Address} programAddress - The oft program expected to own it.
- * @returns {OftStore | null} The oft store, or null if the account is missing, has another owner or discriminator, or is truncated.
+ * @returns {OftStore | null} The oft store, or null if the account is missing or has another owner.
+ * @throws {Error} If the account's data has another discriminator or is truncated.
  */
 export function parseOftStore (account, programAddress) {
   if (!account.exists || account.programAddress !== programAddress) {
     return null
   }
 
-  try {
-    return oftStoreDecoder.decode(account.data)
-  } catch {
-    return null
-  }
+  return decodeAccount(account, oftStoreDecoder).data
 }
 
 /**
@@ -243,18 +241,15 @@ export function parseOftStore (account, programAddress) {
  *
  * @param {MaybeEncodedAccount} account - The account.
  * @param {Address} programAddress - The oft program expected to own it.
- * @returns {PeerConfig | null} The peer config, or null if the account is missing, has another owner or discriminator, or is truncated.
+ * @returns {PeerConfig | null} The peer config, or null if the account is missing or has another owner.
+ * @throws {Error} If the account's data has another discriminator or is truncated.
  */
 export function parsePeerConfig (account, programAddress) {
   if (!account.exists || account.programAddress !== programAddress) {
     return null
   }
 
-  try {
-    return peerConfigDecoder.decode(account.data)
-  } catch {
-    return null
-  }
+  return decodeAccount(account, peerConfigDecoder).data
 }
 
 /**

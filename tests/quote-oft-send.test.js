@@ -358,13 +358,17 @@ describe('Legacy Mesh account parsers', () => {
     expect(peer.enforcedOptions.sendOft.length).toBeGreaterThan(0)
   })
 
-  test('returns null for missing, foreign, mismatched, or truncated accounts', () => {
+  test('returns null for missing or foreign accounts', () => {
     const store = account(DEPLOYMENT.oftStore)
     expect(parseOftStore(parseBase64RpcAccount(DEPLOYMENT.oftStore, null), DEPLOYMENT.programId)).toBeNull()
     expect(parseOftStore({ ...store, programAddress: PAYER }, DEPLOYMENT.programId)).toBeNull()
-    expect(parseOftStore(account(ARBITRUM_PEER), DEPLOYMENT.programId)).toBeNull()
+    expect(parsePeerConfig(parseBase64RpcAccount(ARBITRUM_PEER, null), DEPLOYMENT.programId)).toBeNull()
+  })
+
+  test('throws for mismatched or truncated accounts', () => {
     const truncated = Buffer.from(FIXTURE.accounts[DEPLOYMENT.oftStore].data, 'base64').subarray(0, 100).toString('base64')
-    expect(parseOftStore(account(DEPLOYMENT.oftStore, truncated), DEPLOYMENT.programId)).toBeNull()
-    expect(parsePeerConfig(store, DEPLOYMENT.programId)).toBeNull()
+    expect(() => parseOftStore(account(ARBITRUM_PEER), DEPLOYMENT.programId)).toThrow(`Failed to decode account data at address: ${ARBITRUM_PEER}`)
+    expect(() => parseOftStore(account(DEPLOYMENT.oftStore, truncated), DEPLOYMENT.programId)).toThrow(`Failed to decode account data at address: ${DEPLOYMENT.oftStore}`)
+    expect(() => parsePeerConfig(account(DEPLOYMENT.oftStore), DEPLOYMENT.programId)).toThrow(`Failed to decode account data at address: ${DEPLOYMENT.oftStore}`)
   })
 })
