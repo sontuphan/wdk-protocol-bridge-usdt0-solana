@@ -65,7 +65,17 @@ import {
 /** @typedef {import('@tetherto/wdk-wallet').IWalletAccount} IWalletAccount */
 /** @typedef {import('@tetherto/wdk-wallet').IWalletAccountReadOnly} IWalletAccountReadOnly */
 
-/** @typedef {import('@tetherto/wdk-wallet-solana-gasless').SolanaGaslessWalletPaymasterConfigOverrides} SolanaGaslessWalletPaymasterConfigOverrides */
+/**
+ * The paymaster options a gasless wallet account accepts as overrides.
+ *
+ * Mirrors `SolanaGaslessWalletPaymasterConfigOverrides` from `@tetherto/wdk-wallet-solana-gasless`; declared locally so the
+ * gasless wallet is not a runtime dependency.
+ *
+ * @typedef {Object} SolanaGaslessWalletPaymasterConfigOverrides
+ * @property {{ address: string }} [paymasterToken] - The paymaster token configuration.
+ * @property {number | bigint} [transferMaxFee] - The maximum fee amount for transfer operations.
+ * @property {number | bigint} [transactionMaxFee] - The maximum fee amount for sendTransaction and signTransaction operations.
+ */
 
 /** @typedef {import('@solana/addresses').Address} SolanaAddress */
 /** @typedef {import('@solana/codecs').ReadonlyUint8Array} ReadonlyUint8Array */

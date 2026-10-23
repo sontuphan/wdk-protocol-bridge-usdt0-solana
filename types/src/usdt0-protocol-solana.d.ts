@@ -74,7 +74,28 @@ export type BridgeProtocolConfig = import("@tetherto/wdk-wallet/protocols").Brid
 export type BridgeResult = import("@tetherto/wdk-wallet/protocols").BridgeResult;
 export type IWalletAccount = import("@tetherto/wdk-wallet").IWalletAccount;
 export type IWalletAccountReadOnly = import("@tetherto/wdk-wallet").IWalletAccountReadOnly;
-export type SolanaGaslessWalletPaymasterConfigOverrides = import("@tetherto/wdk-wallet-solana-gasless").SolanaGaslessWalletPaymasterConfigOverrides;
+/**
+ * The paymaster options a gasless wallet account accepts as overrides.
+ *
+ * Mirrors `SolanaGaslessWalletPaymasterConfigOverrides` from `@tetherto/wdk-wallet-solana-gasless`; declared locally so the
+ * gasless wallet is not a runtime dependency.
+ */
+export type SolanaGaslessWalletPaymasterConfigOverrides = {
+    /**
+     * - The paymaster token configuration.
+     */
+    paymasterToken?: {
+        address: string;
+    };
+    /**
+     * - The maximum fee amount for transfer operations.
+     */
+    transferMaxFee?: number | bigint;
+    /**
+     * - The maximum fee amount for sendTransaction and signTransaction operations.
+     */
+    transactionMaxFee?: number | bigint;
+};
 /**
  * A chain supported by the protocol, in the canonical WDK swidge shape.
  *
