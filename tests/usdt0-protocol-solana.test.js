@@ -86,6 +86,17 @@ describe('Usdt0ProtocolSolana', () => {
         .rejects.toThrow('Exceeded maximum fee cost for bridge operation.')
     })
 
+    test('should apply a bridgeMaxFee override', async () => {
+      protocol = new Usdt0ProtocolSolana(account, { bridgeMaxFee: 10_000_000n })
+      jest.spyOn(protocol, '_getOftRoute').mockResolvedValue(ROUTE)
+      jest.spyOn(protocol, '_quoteOftSend').mockResolvedValue({ nativeFee: 1_000_000n, lzTokenFee: 0n })
+      jest.spyOn(protocol, '_buildOftSendInstructions').mockResolvedValue([INSTRUCTION])
+
+      await expect(protocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 100 }, { bridgeMaxFee: 1_004_999n }))
+        .rejects.toThrow('Exceeded maximum fee cost for bridge operation.')
+      expect(account.sendTransaction).not.toHaveBeenCalled()
+    })
+
     test('should allow a bridge cost equal to the bridge max fee', async () => {
       protocol = new Usdt0ProtocolSolana(account, { bridgeMaxFee: 1_005_000n })
       jest.spyOn(protocol, '_getOftRoute').mockResolvedValue(ROUTE)
@@ -148,15 +159,15 @@ describe('Usdt0ProtocolSolana', () => {
       jest.spyOn(gaslessProtocol, '_buildOftSendInstructions').mockResolvedValue([INSTRUCTION])
     }
 
-    test('should bridge through the kora paymaster, which pays the layerzero fee, with the paymaster overrides', async () => {
+    test('should bridge through the kora paymaster, which pays the layerzero fee, with the paymaster overrides and without bridgeMaxFee', async () => {
       const gaslessAccount = new WalletAccountSolanaGasless(SEED_PHRASE, "0'/0'", GASLESS_CONFIG)
-      jest.spyOn(gaslessAccount, 'quoteSendTransaction').mockResolvedValue({ fee: 250_000n })
+      jest.spyOn(gaslessAccount, 'quoteSendTransaction')
       jest.spyOn(gaslessAccount, 'sendTransaction').mockResolvedValue({ hash: 'gasless-signature', fee: 250_000n })
-      const gaslessProtocol = new Usdt0ProtocolSolana(gaslessAccount)
+      const gaslessProtocol = new Usdt0ProtocolSolana(gaslessAccount, { bridgeMaxFee: 1n })
       spyOnBridgeSteps(gaslessProtocol)
 
       const overrides = { paymasterToken: { address: MINT }, transactionMaxFee: 300_000n }
-      const result = await gaslessProtocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 1_000_000 }, { ...overrides, bridgeMaxFee: 1_250_000n })
+      const result = await gaslessProtocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 1_000_000 }, { ...overrides, bridgeMaxFee: 1n })
 
       expect(result).toEqual({ hash: 'gasless-signature', fee: 250_000n, bridgeFee: 1_000_000n })
 
@@ -168,19 +179,17 @@ describe('Usdt0ProtocolSolana', () => {
       const [tx, sendConfig] = gaslessAccount.sendTransaction.mock.calls[0]
       expect(tx.instructions).toEqual([INSTRUCTION])
       expect(sendConfig).toEqual(overrides)
-      expect(gaslessAccount.quoteSendTransaction).toHaveBeenCalledWith(tx, overrides)
+      expect(gaslessAccount.quoteSendTransaction).not.toHaveBeenCalled()
     })
 
-    test('should apply a bridgeMaxFee override', async () => {
-      const gaslessAccount = new WalletAccountSolanaGasless(SEED_PHRASE, "0'/0'", GASLESS_CONFIG)
-      jest.spyOn(gaslessAccount, 'quoteSendTransaction').mockResolvedValue({ fee: 250_000n })
-      jest.spyOn(gaslessAccount, 'sendTransaction')
-      const gaslessProtocol = new Usdt0ProtocolSolana(gaslessAccount, { bridgeMaxFee: 10_000_000n })
-      spyOnBridgeSteps(gaslessProtocol)
+    test('should recognise a gasless account from another copy of the gasless package by its paymaster address', async () => {
+      account._config = { paymasterAddress: PAYMASTER }
 
-      await expect(gaslessProtocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 100 }, { bridgeMaxFee: 1_249_999n }))
-        .rejects.toThrow('Exceeded maximum fee cost for bridge operation.')
-      expect(gaslessAccount.sendTransaction).not.toHaveBeenCalled()
+      await protocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 100 })
+
+      expect(protocol._quoteOftSend.mock.calls[0][2]).toBe(PAYMASTER)
+      expect(protocol._buildOftSendInstructions.mock.calls[0][4]).toBe(PAYMASTER)
+      expect(account.quoteSendTransaction).not.toHaveBeenCalled()
     })
 
     test('should quote from a read-only gasless account with the paymaster as the payer', async () => {

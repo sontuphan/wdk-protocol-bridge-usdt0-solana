@@ -23,6 +23,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
      * @param {BridgeOptions} options - The bridge's options. Optionally pass 'dstEid' to override the destination endpoint id.
      * @param {SolanaGaslessWalletPaymasterConfigOverrides & Pick<BridgeProtocolConfig, 'bridgeMaxFee'>} [config] - If the protocol has been
      *   initialized with a gasless wallet account, it can be used to override its paymaster options; 'bridgeMaxFee' overrides the protocol's.
+     *   A gasless account ignores 'bridgeMaxFee': its 'transactionMaxFee' caps the paymaster fee, which includes the layerzero fee.
      * @returns {Promise<BridgeResult>} The bridge's result.
      */
     bridge(options: BridgeOptions, config?: SolanaGaslessWalletPaymasterConfigOverrides & Pick<BridgeProtocolConfig, "bridgeMaxFee">): Promise<BridgeResult>;

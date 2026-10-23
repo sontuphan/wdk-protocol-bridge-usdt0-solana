@@ -16,7 +16,6 @@
 
 import { BridgeProtocol } from '@tetherto/wdk-wallet/protocols'
 import { validateEVMAddress, validateTonAddress, validateTronAddress } from '@tetherto/wdk-utils'
-import { WalletAccountReadOnlySolanaGasless } from '@tetherto/wdk-wallet-solana-gasless'
 
 import { Options, addressToBytes32 } from '@layerzerolabs/lz-v2-utilities'
 
@@ -173,6 +172,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
    * @param {BridgeOptions} options - The bridge's options. Optionally pass 'dstEid' to override the destination endpoint id.
    * @param {SolanaGaslessWalletPaymasterConfigOverrides & Pick<BridgeProtocolConfig, 'bridgeMaxFee'>} [config] - If the protocol has been
    *   initialized with a gasless wallet account, it can be used to override its paymaster options; 'bridgeMaxFee' overrides the protocol's.
+   *   A gasless account ignores 'bridgeMaxFee': its 'transactionMaxFee' caps the paymaster fee, which includes the layerzero fee.
    * @returns {Promise<BridgeResult>} The bridge's result.
    */
   async bridge (options, config) {
@@ -188,13 +188,19 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
     const { tx, bridgeFee } = await this._getBridgeTransaction(options)
 
-    const { fee } = await this._account.quoteSendTransaction(tx, accountConfig)
+    if (this._account._config?.paymasterAddress) {
+      const { hash, fee } = await this._account.sendTransaction(tx, accountConfig)
+
+      return { hash, fee, bridgeFee }
+    }
+
+    const { fee } = await this._account.quoteSendTransaction(tx)
 
     if (bridgeMaxFee !== undefined && fee + bridgeFee > bridgeMaxFee) {
       throw new Error('Exceeded maximum fee cost for bridge operation.')
     }
 
-    const { hash } = await this._account.sendTransaction(tx, accountConfig)
+    const { hash } = await this._account.sendTransaction(tx)
 
     return { hash, fee, bridgeFee }
   }
@@ -350,8 +356,9 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
     const sender = address(await this._account.getAddress())
 
-    // A gasless account's kora paymaster pays the transaction and fronts the layerzero fee as its fee payer.
-    const payer = this._account instanceof WalletAccountReadOnlySolanaGasless ? address(this._account._config.paymasterAddress) : sender
+    // A gasless account's kora paymaster pays the transaction and fronts the layerzero fee as its fee payer. Matched by shape, not
+    // instanceof, so accounts from another copy of wdk-wallet-solana-gasless are recognised too.
+    const payer = this._account._config?.paymasterAddress ? address(this._account._config.paymasterAddress) : sender
 
     const { nativeFee: bridgeFee } = await this._quoteOftSend(route, sendParam, payer)
 
