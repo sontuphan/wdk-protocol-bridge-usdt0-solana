@@ -20,6 +20,8 @@
 
 /** @typedef {import('./src/usdt0-protocol-solana.js').BridgeOptions} BridgeOptions */
 
+/** @typedef {import('./src/usdt0-protocol-solana.js').SolanaGaslessWalletPaymasterConfigOverrides} SolanaGaslessWalletPaymasterConfigOverrides */
+
 /** @typedef {import('./src/usdt0-protocol-solana.js').SwidgeSupportedChain} SwidgeSupportedChain */
 
 /** @typedef {import('./src/usdt0-protocol-solana.js').SwidgeSupportedToken} SwidgeSupportedToken */
