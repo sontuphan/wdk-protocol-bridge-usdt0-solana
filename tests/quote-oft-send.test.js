@@ -68,7 +68,7 @@ describe('_quoteOftSend', () => {
     oftCmd: new Uint8Array()
   })
 
-  const quote = async (params = sendParam()) => protocol._quoteOftSend(await protocol._getOftRoute(DEPLOYMENT, params.dstEid), params)
+  const quote = async (params = sendParam()) => protocol._quoteOftSend(await protocol._getOftRoute(DEPLOYMENT, params.dstEid), params, PAYER)
 
   const simulated = () => {
     const [wire] = rpc.simulateTransaction.mock.calls[0]
@@ -252,7 +252,7 @@ describe('_buildOftSendInstructions', () => {
 
   let accounts, protocol
 
-  const build = async () => protocol._buildOftSendInstructions(await protocol._getOftRoute(DEPLOYMENT, 30_110), {
+  const build = async (payer = PAYER) => protocol._buildOftSendInstructions(await protocol._getOftRoute(DEPLOYMENT, 30_110), {
     dstEid: 30_110,
     to: protocol._encodeRecipient('arbitrum', '0xa460AEbce0d3A4BecAd8ccf9D6D4861296c503Bd'),
     amountLD: 1_000_000n,
@@ -260,7 +260,7 @@ describe('_buildOftSendInstructions', () => {
     extraOptions: Options.newOptions().toBytes(),
     composeMsg: new Uint8Array(),
     oftCmd: new Uint8Array()
-  }, NATIVE_FEE, PAYER)
+  }, NATIVE_FEE, PAYER, payer)
 
   beforeEach(() => {
     accounts = { ...FIXTURE.accounts }
@@ -311,6 +311,19 @@ describe('_buildOftSendInstructions', () => {
 
     const message = setTransactionMessageFeePayer(PAYER, appendTransactionMessageInstructions(instructions, createTransactionMessage({ version: 0 })))
     expect(getBase64Encoder().encode(getBase64EncodedWireTransaction(compileTransaction(message))).length).toBeLessThanOrEqual(1_232)
+  })
+
+  test('makes a gasless paymaster the layerzero fee payer while the sender keeps signing the send', async () => {
+    const paymaster = getAddressDecoder().decode(new Uint8Array(32).fill(5))
+    const [, send] = await build(paymaster)
+
+    const sendAccounts = FIXTURE.sendAccounts.map(([account, role]) => account === PAYER ? [paymaster, role] : [account, role])
+    expect(send.accounts.map(account => [account.address, account.role])).toEqual([
+      ...send.accounts.slice(0, 10).map(account => [account.address, account.role]),
+      ...sendAccounts
+    ])
+    expect([send.accounts[0].address, send.accounts[0].role]).toEqual([PAYER, AccountRole.READONLY_SIGNER])
+    expect(sendAccounts).toContainEqual([paymaster, AccountRole.WRITABLE_SIGNER])
   })
 
   test('pays the ULN treasury when one is set', async () => {

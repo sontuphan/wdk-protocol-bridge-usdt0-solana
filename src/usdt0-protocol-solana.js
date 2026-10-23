@@ -16,6 +16,7 @@
 
 import { BridgeProtocol } from '@tetherto/wdk-wallet/protocols'
 import { validateEVMAddress, validateTonAddress, validateTronAddress } from '@tetherto/wdk-utils'
+import { WalletAccountReadOnlySolanaGasless } from '@tetherto/wdk-wallet-solana-gasless'
 
 import { Options, addressToBytes32 } from '@layerzerolabs/lz-v2-utilities'
 
@@ -64,6 +65,8 @@ import {
 
 /** @typedef {import('@tetherto/wdk-wallet').IWalletAccount} IWalletAccount */
 /** @typedef {import('@tetherto/wdk-wallet').IWalletAccountReadOnly} IWalletAccountReadOnly */
+
+/** @typedef {import('@tetherto/wdk-wallet-solana-gasless').SolanaGaslessWalletPaymasterConfigOverrides} SolanaGaslessWalletPaymasterConfigOverrides */
 
 /** @typedef {import('@solana/addresses').Address} SolanaAddress */
 /** @typedef {import('@solana/codecs').ReadonlyUint8Array} ReadonlyUint8Array */
@@ -165,10 +168,14 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
   /**
    * Bridges a token from solana to a different blockchain.
    *
+   * Gasless accounts pay through their kora paymaster, which also fronts the layerzero fee and charges it back in the paymaster token.
+   *
    * @param {BridgeOptions} options - The bridge's options. Optionally pass 'dstEid' to override the destination endpoint id.
+   * @param {SolanaGaslessWalletPaymasterConfigOverrides & Pick<BridgeProtocolConfig, 'bridgeMaxFee'>} [config] - If the protocol has been
+   *   initialized with a gasless wallet account, it can be used to override its paymaster options; 'bridgeMaxFee' overrides the protocol's.
    * @returns {Promise<BridgeResult>} The bridge's result.
    */
-  async bridge (options) {
+  async bridge (options, config) {
     if (typeof this._account.sendTransaction !== 'function') {
       throw new Error("The 'bridge(options)' method requires the protocol to be initialized with a non read-only account.")
     }
@@ -177,15 +184,17 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       throw new Error('The wallet must be connected to a provider in order to perform bridge operations.')
     }
 
+    const { bridgeMaxFee = this._config.bridgeMaxFee, ...accountConfig } = config ?? {}
+
     const { tx, bridgeFee } = await this._getBridgeTransaction(options)
 
-    const { fee } = await this._account.quoteSendTransaction(tx)
+    const { fee } = await this._account.quoteSendTransaction(tx, accountConfig)
 
-    if (this._config.bridgeMaxFee !== undefined && fee + bridgeFee > this._config.bridgeMaxFee) {
+    if (bridgeMaxFee !== undefined && fee + bridgeFee > bridgeMaxFee) {
       throw new Error('Exceeded maximum fee cost for bridge operation.')
     }
 
-    const { hash } = await this._account.sendTransaction(tx)
+    const { hash } = await this._account.sendTransaction(tx, accountConfig)
 
     return { hash, fee, bridgeFee }
   }
@@ -194,16 +203,18 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
    * Quotes the costs of a bridge operation.
    *
    * @param {BridgeOptions} options - The bridge's options. Optionally pass 'dstEid' to override the destination endpoint id.
+   * @param {SolanaGaslessWalletPaymasterConfigOverrides} [config] - If the protocol has been initialized with a gasless wallet account,
+   *   it can be used to override its paymaster options.
    * @returns {Promise<Omit<BridgeResult, 'hash'>>} The bridge's quotes.
    */
-  async quoteBridge (options) {
+  async quoteBridge (options, config) {
     if (!this._account._rpc) {
       throw new Error('The wallet must be connected to a provider in order to quote bridge operations.')
     }
 
     const { tx, bridgeFee } = await this._getBridgeTransaction(options)
 
-    const { fee } = await this._account.quoteSendTransaction(tx)
+    const { fee } = await this._account.quoteSendTransaction(tx, config)
 
     return { fee, bridgeFee }
   }
@@ -337,11 +348,14 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       oftCmd: new Uint8Array()
     }
 
-    const { nativeFee: bridgeFee } = await this._quoteOftSend(route, sendParam)
-
     const sender = address(await this._account.getAddress())
 
-    const instructions = await this._buildOftSendInstructions(route, sendParam, bridgeFee, sender)
+    // A gasless account's kora paymaster pays the transaction and fronts the layerzero fee as its fee payer.
+    const payer = this._account instanceof WalletAccountReadOnlySolanaGasless ? address(this._account._config.paymasterAddress) : sender
+
+    const { nativeFee: bridgeFee } = await this._quoteOftSend(route, sendParam, payer)
+
+    const instructions = await this._buildOftSendInstructions(route, sendParam, bridgeFee, sender, payer)
 
     const tx = appendTransactionMessageInstructions(instructions, createTransactionMessage({ version: 0 }))
 
@@ -349,7 +363,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
   }
 
   /** @private */
-  async _quoteOftSend (route, sendParam) {
+  async _quoteOftSend (route, sendParam, payer) {
     // @see https://github.com/LayerZero-Labs/usdt-native-mesh/blob/main/programs/oft/src/instructions/quote_send.rs
 
     if (sendParam.to.length !== 32 || sendParam.oftCmd.length !== 0) {
@@ -370,7 +384,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     const message = compressTransactionMessageUsingAddressLookupTables(
       appendTransactionMessageInstructions(
         [getSetComputeUnitLimitInstruction({ units: MAX_COMPUTE_UNIT_LIMIT }), instruction],
-        setTransactionMessageFeePayer(address(await this._account.getAddress()), createTransactionMessage({ version: 0 }))
+        setTransactionMessageFeePayer(payer, createTransactionMessage({ version: 0 }))
       ),
       lookupTables
     )
@@ -570,7 +584,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
   }
 
   /** @private */
-  async _buildOftSendInstructions (route, sendParam, nativeFee, sender) {
+  async _buildOftSendInstructions (route, sendParam, nativeFee, sender, payer) {
     // @see https://github.com/LayerZero-Labs/usdt-native-mesh/blob/main/programs/oft/src/instructions/send.rs
 
     const { programAddress, oftStore, peer, credits, store, peerConfig, lookupTables } = route
@@ -578,7 +592,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     const [[tokenSource], [eventAuthority], remainingAccounts] = await Promise.all([
       findAssociatedTokenPda({ mint: store.tokenMint, owner: sender, tokenProgram: TOKEN_PROGRAM_ADDRESS }),
       getProgramDerivedAddress({ programAddress, seeds: ['__event_authority'] }),
-      this._getEndpointAccounts(store.endpointProgram, oftStore, sendParam.dstEid, peerConfig.peerAddress, sender)
+      this._getEndpointAccounts(store.endpointProgram, oftStore, sendParam.dstEid, peerConfig.peerAddress, payer)
     ])
 
     /** @type {Array<[SolanaAddress, AccountRole?]>} */

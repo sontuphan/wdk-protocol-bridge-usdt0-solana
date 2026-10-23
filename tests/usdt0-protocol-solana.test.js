@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, jest, test } from '@jest/globals'
 
 import { getBase16Decoder } from '@solana/codecs'
 
+import { WalletAccountReadOnlySolanaGasless, WalletAccountSolanaGasless } from '@tetherto/wdk-wallet-solana-gasless'
+
 import { Address } from '@ton/core'
 
 import Usdt0ProtocolSolana from '../index.js'
@@ -21,6 +23,12 @@ const toHex = (bytes) => getBase16Decoder().decode(bytes)
 const INSTRUCTION = { programAddress: SOLANA_ADDRESS, accounts: [], data: new Uint8Array([1]) }
 
 const ROUTE = { store: { feeBps: 3 } }
+
+const SEED_PHRASE = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
+
+const PAYMASTER = 'LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY'
+
+const GASLESS_CONFIG = { provider: 'https://api.mainnet-beta.solana.com', paymasterUrl: 'https://kora.example', paymasterAddress: PAYMASTER, paymasterToken: { address: MINT } }
 
 describe('Usdt0ProtocolSolana', () => {
   let account, protocol
@@ -51,7 +59,8 @@ describe('Usdt0ProtocolSolana', () => {
 
       const [route, sendParam, nativeFee, sender] = protocol._buildOftSendInstructions.mock.calls[0]
       expect(route).toBe(ROUTE)
-      expect(protocol._quoteOftSend).toHaveBeenCalledWith(ROUTE, sendParam)
+      expect(protocol._quoteOftSend).toHaveBeenCalledWith(ROUTE, sendParam, SOLANA_ADDRESS)
+      expect(protocol._buildOftSendInstructions.mock.calls[0][4]).toBe(SOLANA_ADDRESS)
       expect(sendParam.dstEid).toBe(30_110)
       expect(sendParam.amountLD).toBe(1_000_000n)
       // The 3 bps store fee is 300, so exactly the rest must arrive.
@@ -129,6 +138,64 @@ describe('Usdt0ProtocolSolana', () => {
 
       const [, sendParam] = protocol._buildOftSendInstructions.mock.calls[0]
       expect(sendParam.amountLD).toBe(2n ** 64n - 1n)
+    })
+  })
+
+  describe('gasless accounts', () => {
+    const spyOnBridgeSteps = (gaslessProtocol) => {
+      jest.spyOn(gaslessProtocol, '_getOftRoute').mockResolvedValue(ROUTE)
+      jest.spyOn(gaslessProtocol, '_quoteOftSend').mockResolvedValue({ nativeFee: 1_000_000n, lzTokenFee: 0n })
+      jest.spyOn(gaslessProtocol, '_buildOftSendInstructions').mockResolvedValue([INSTRUCTION])
+    }
+
+    test('should bridge through the kora paymaster, which pays the layerzero fee, with the paymaster overrides', async () => {
+      const gaslessAccount = new WalletAccountSolanaGasless(SEED_PHRASE, "0'/0'", GASLESS_CONFIG)
+      jest.spyOn(gaslessAccount, 'quoteSendTransaction').mockResolvedValue({ fee: 250_000n })
+      jest.spyOn(gaslessAccount, 'sendTransaction').mockResolvedValue({ hash: 'gasless-signature', fee: 250_000n })
+      const gaslessProtocol = new Usdt0ProtocolSolana(gaslessAccount)
+      spyOnBridgeSteps(gaslessProtocol)
+
+      const overrides = { paymasterToken: { address: MINT }, transactionMaxFee: 300_000n }
+      const result = await gaslessProtocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 1_000_000 }, { ...overrides, bridgeMaxFee: 1_250_000n })
+
+      expect(result).toEqual({ hash: 'gasless-signature', fee: 250_000n, bridgeFee: 1_000_000n })
+
+      const sender = await gaslessAccount.getAddress()
+      const [, sendParam, , builtSender, payer] = gaslessProtocol._buildOftSendInstructions.mock.calls[0]
+      expect([builtSender, payer]).toEqual([sender, PAYMASTER])
+      expect(gaslessProtocol._quoteOftSend).toHaveBeenCalledWith(ROUTE, sendParam, PAYMASTER)
+
+      const [tx, sendConfig] = gaslessAccount.sendTransaction.mock.calls[0]
+      expect(tx.instructions).toEqual([INSTRUCTION])
+      expect(sendConfig).toEqual(overrides)
+      expect(gaslessAccount.quoteSendTransaction).toHaveBeenCalledWith(tx, overrides)
+    })
+
+    test('should apply a bridgeMaxFee override', async () => {
+      const gaslessAccount = new WalletAccountSolanaGasless(SEED_PHRASE, "0'/0'", GASLESS_CONFIG)
+      jest.spyOn(gaslessAccount, 'quoteSendTransaction').mockResolvedValue({ fee: 250_000n })
+      jest.spyOn(gaslessAccount, 'sendTransaction')
+      const gaslessProtocol = new Usdt0ProtocolSolana(gaslessAccount, { bridgeMaxFee: 10_000_000n })
+      spyOnBridgeSteps(gaslessProtocol)
+
+      await expect(gaslessProtocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 100 }, { bridgeMaxFee: 1_249_999n }))
+        .rejects.toThrow('Exceeded maximum fee cost for bridge operation.')
+      expect(gaslessAccount.sendTransaction).not.toHaveBeenCalled()
+    })
+
+    test('should quote from a read-only gasless account with the paymaster as the payer', async () => {
+      const readOnlyAccount = new WalletAccountReadOnlySolanaGasless(SOLANA_ADDRESS, GASLESS_CONFIG)
+      jest.spyOn(readOnlyAccount, 'quoteSendTransaction').mockResolvedValue({ fee: 250_000n })
+      const gaslessProtocol = new Usdt0ProtocolSolana(readOnlyAccount)
+      spyOnBridgeSteps(gaslessProtocol)
+
+      const overrides = { paymasterToken: { address: MINT } }
+      expect(await gaslessProtocol.quoteBridge({ targetChain: 'ton', recipient: TON_ADDRESS, token: MINT, amount: 100 }, overrides))
+        .toEqual({ fee: 250_000n, bridgeFee: 1_000_000n })
+
+      const [, , , sender, payer] = gaslessProtocol._buildOftSendInstructions.mock.calls[0]
+      expect([sender, payer]).toEqual([SOLANA_ADDRESS, PAYMASTER])
+      expect(readOnlyAccount.quoteSendTransaction.mock.calls[0][1]).toEqual(overrides)
     })
   })
 

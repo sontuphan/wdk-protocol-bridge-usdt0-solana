@@ -18,17 +18,23 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     /**
      * Bridges a token from solana to a different blockchain.
      *
+     * Gasless accounts pay through their kora paymaster, which also fronts the layerzero fee and charges it back in the paymaster token.
+     *
      * @param {BridgeOptions} options - The bridge's options. Optionally pass 'dstEid' to override the destination endpoint id.
+     * @param {SolanaGaslessWalletPaymasterConfigOverrides & Pick<BridgeProtocolConfig, 'bridgeMaxFee'>} [config] - If the protocol has been
+     *   initialized with a gasless wallet account, it can be used to override its paymaster options; 'bridgeMaxFee' overrides the protocol's.
      * @returns {Promise<BridgeResult>} The bridge's result.
      */
-    bridge(options: BridgeOptions): Promise<BridgeResult>;
+    bridge(options: BridgeOptions, config?: SolanaGaslessWalletPaymasterConfigOverrides & Pick<BridgeProtocolConfig, "bridgeMaxFee">): Promise<BridgeResult>;
     /**
      * Quotes the costs of a bridge operation.
      *
      * @param {BridgeOptions} options - The bridge's options. Optionally pass 'dstEid' to override the destination endpoint id.
+     * @param {SolanaGaslessWalletPaymasterConfigOverrides} [config] - If the protocol has been initialized with a gasless wallet account,
+     *   it can be used to override its paymaster options.
      * @returns {Promise<Omit<BridgeResult, 'hash'>>} The bridge's quotes.
      */
-    quoteBridge(options: BridgeOptions): Promise<Omit<BridgeResult, "hash">>;
+    quoteBridge(options: BridgeOptions, config?: SolanaGaslessWalletPaymasterConfigOverrides): Promise<Omit<BridgeResult, "hash">>;
     /**
      * Retrieves the chains supported by the protocol for bridge operations.
      *
@@ -67,6 +73,7 @@ export type BridgeProtocolConfig = import("@tetherto/wdk-wallet/protocols").Brid
 export type BridgeResult = import("@tetherto/wdk-wallet/protocols").BridgeResult;
 export type IWalletAccount = import("@tetherto/wdk-wallet").IWalletAccount;
 export type IWalletAccountReadOnly = import("@tetherto/wdk-wallet").IWalletAccountReadOnly;
+export type SolanaGaslessWalletPaymasterConfigOverrides = import("@tetherto/wdk-wallet-solana-gasless").SolanaGaslessWalletPaymasterConfigOverrides;
 /**
  * A chain supported by the protocol, in the canonical WDK swidge shape.
  *

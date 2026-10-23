@@ -1,7 +1,5 @@
 # @tetherto/wdk-protocol-bridge-usdt0-solana
 
-**Note**: This package is a work in progress. The OFT program integration is not implemented yet.
-
 A bridge module for WDK (Wallet Development Kit) by Tether that lets Solana wallet accounts move [USD₮0](https://usdt0.to/) tokens to other blockchains through LayerZero. It is the Solana counterpart of [`@tetherto/wdk-protocol-bridge-usdt0-evm`](https://github.com/tetherto/wdk-protocol-bridge-usdt0-evm).
 
 ## ⬇️ Installation
@@ -45,23 +43,36 @@ const { hash, fee, bridgeFee } = await usdt0Bridge.bridge({
 
 Supported destinations are the USDT0 Legacy Mesh chains: Ethereum, Arbitrum, Celo, TON and TRON. `fee` is the Solana transaction fee and `bridgeFee` the LayerZero messaging fee, both in lamports.
 
+### Gasless accounts
+
+Accounts from [`@tetherto/wdk-wallet-solana-gasless`](https://github.com/tetherto/wdk-wallet-solana-gasless) bridge without holding SOL. Their Kora paymaster is the fee payer: it pays the transaction, fronts the LayerZero fee, and charges both back in the paymaster token through the wallet's payment instruction. For these accounts `fee` is that payment, in the paymaster token's base units.
+
+```javascript
+const { hash, fee, bridgeFee } = await usdt0Bridge.bridge(options, {
+  paymasterToken: { address: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB' }, // optional override
+  transactionMaxFee: 100_000n // optional override, in paymaster token base units
+})
+```
+
+The Kora node must allow the paymaster to front the LayerZero fee: margin pricing, so the fee it pays is charged back, and `fee_payer_policy.system.allow_transfer = true`, since the ULN pays its workers from the fee payer. The OFT, endpoint, ULN, executor and DVN programs must also be allowed.
+
 ## 📚 API
 
 ### `new Usdt0ProtocolSolana(account, config?)`
 
-- `account`: a `WalletAccountSolana` (or `WalletAccountReadOnlySolana` for quotes only).
+- `account`: a `WalletAccountSolana` or `WalletAccountSolanaGasless` (or their read-only counterparts for quotes only).
 - `config.bridgeMaxFee`: optional upper bound on `fee + bridgeFee`, in lamports.
 
 ### Methods
 
 | Method | Description |
 | --- | --- |
-| `bridge(options)` | Sends the bridge transaction. Returns `{ hash, fee, bridgeFee }`. |
-| `quoteBridge(options)` | Quotes the bridge. Returns `{ fee, bridgeFee }`. |
+| `bridge(options, config?)` | Sends the bridge transaction. Returns `{ hash, fee, bridgeFee }`. |
+| `quoteBridge(options, config?)` | Quotes the bridge. Returns `{ fee, bridgeFee }`. |
 | `getSupportedChains()` | Lists the supported chains. |
 | `getSupportedTokens(options?)` | Lists the supported tokens, optionally scoped by `fromChain`, `toChain` or `fromToken`. |
 
-`options` is `{ targetChain, recipient, token, amount, dstEid? }`, where `token` is the SPL mint address and `dstEid` overrides the LayerZero endpoint id of the target chain.
+`options` is `{ targetChain, recipient, token, amount, dstEid? }`, where `token` is the SPL mint address and `dstEid` overrides the LayerZero endpoint id of the target chain. `config` overrides a gasless account's paymaster options (`paymasterToken`, `transactionMaxFee`); for `bridge` it can also override `bridgeMaxFee`.
 
 ## 🛠️ Development
 
