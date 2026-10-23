@@ -1,21 +1,5 @@
 export default class Usdt0ProtocolSolana extends BridgeProtocol {
     /**
-     * Creates a new read-only interface to the usdt0 protocol for the solana blockchain.
-     *
-     * @overload
-     * @param {IWalletAccountReadOnly} account - The wallet account to use to interact with the protocol.
-     * @param {BridgeProtocolConfig} [config] - The bridge protocol configuration.
-     */
-    constructor(account: IWalletAccountReadOnly, config?: BridgeProtocolConfig);
-    /**
-     * Creates a new interface to the usdt0 protocol for the solana blockchain.
-     *
-     * @overload
-     * @param {IWalletAccount} account - The wallet account to use to interact with the protocol.
-     * @param {BridgeProtocolConfig} [config] - The bridge protocol configuration.
-     */
-    constructor(account: IWalletAccount, config?: BridgeProtocolConfig);
-    /**
      * Bridges a token from solana to a different blockchain.
      *
      * Gasless accounts pay through their kora paymaster, which also fronts the layerzero fee and charges it back in the paymaster token.
@@ -75,8 +59,6 @@ export type BridgeResult = import("@tetherto/wdk-wallet/protocols").BridgeResult
 export type SwidgeSupportedChain = import("@tetherto/wdk-wallet/protocols").SwidgeSupportedChain;
 export type SwidgeSupportedToken = import("@tetherto/wdk-wallet/protocols").SwidgeSupportedToken;
 export type SwidgeSupportedTokensOptions = import("@tetherto/wdk-wallet/protocols").SwidgeSupportedTokensOptions;
-export type IWalletAccount = import("@tetherto/wdk-wallet").IWalletAccount;
-export type IWalletAccountReadOnly = import("@tetherto/wdk-wallet").IWalletAccountReadOnly;
 /**
  * The paymaster options a gasless wallet account accepts as overrides.
  *

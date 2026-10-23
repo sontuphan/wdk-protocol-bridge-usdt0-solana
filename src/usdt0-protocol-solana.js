@@ -65,9 +65,6 @@ import {
 /** @typedef {import('@tetherto/wdk-wallet/protocols').SwidgeSupportedToken} SwidgeSupportedToken */
 /** @typedef {import('@tetherto/wdk-wallet/protocols').SwidgeSupportedTokensOptions} SwidgeSupportedTokensOptions */
 
-/** @typedef {import('@tetherto/wdk-wallet').IWalletAccount} IWalletAccount */
-/** @typedef {import('@tetherto/wdk-wallet').IWalletAccountReadOnly} IWalletAccountReadOnly */
-
 /**
  * The paymaster options a gasless wallet account accepts as overrides.
  *
@@ -121,25 +118,6 @@ const U64_MAX = 0xffffffffffffffffn
  */
 
 export default class Usdt0ProtocolSolana extends BridgeProtocol {
-  /**
-   * Creates a new read-only interface to the usdt0 protocol for the solana blockchain.
-   *
-   * @overload
-   * @param {IWalletAccountReadOnly} account - The wallet account to use to interact with the protocol.
-   * @param {BridgeProtocolConfig} [config] - The bridge protocol configuration.
-   */
-
-  /**
-   * Creates a new interface to the usdt0 protocol for the solana blockchain.
-   *
-   * @overload
-   * @param {IWalletAccount} account - The wallet account to use to interact with the protocol.
-   * @param {BridgeProtocolConfig} [config] - The bridge protocol configuration.
-   */
-  constructor (account, config = {}) {
-    super(account, config)
-  }
-
   /**
    * Bridges a token from solana to a different blockchain.
    *
