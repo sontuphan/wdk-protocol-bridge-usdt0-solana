@@ -42,7 +42,7 @@
     "@tetherto/wdk-wallet-solana": "1.0.0-beta.18",
     "@tetherto/wdk-wallet-solana-gasless": "1.0.0-beta.7",
     "@ton/core": "0.61.0",
-    "bare-node-runtime": "^1.4.0"
+    "bare-node-runtime": "^1.5.2"
   },
   "devDependencies": {
     "cross-env": "10.0.0",
