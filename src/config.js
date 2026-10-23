@@ -94,10 +94,5 @@ export const TOKENS = {
     symbol: 'USDT0',
     decimals: 6,
     name: 'USDT0'
-  },
-  XAUT0: {
-    symbol: 'XAUT0',
-    decimals: 6,
-    name: 'Tether Gold'
   }
 }
