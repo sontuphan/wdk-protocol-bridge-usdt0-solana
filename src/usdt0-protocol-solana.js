@@ -121,7 +121,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
   /**
    * Bridges a token from solana to a different blockchain.
    *
-   * Gasless accounts pay through their kora paymaster, which also fronts the layerzero fee and charges it back in the paymaster token.
+   * Gasless accounts pay through their paymaster, which also fronts the layerzero fee and charges it back in the paymaster token.
    *
    * @param {BridgeOptions} options - The bridge's options. Optionally pass 'dstEid' to override the destination endpoint id.
    * @param {SolanaGaslessWalletPaymasterConfigOverrides & Pick<BridgeProtocolConfig, 'bridgeMaxFee'>} [config] - If the protocol has been
