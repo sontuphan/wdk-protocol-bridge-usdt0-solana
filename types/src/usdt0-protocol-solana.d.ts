@@ -72,6 +72,9 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 }
 export type BridgeProtocolConfig = import("@tetherto/wdk-wallet/protocols").BridgeProtocolConfig;
 export type BridgeResult = import("@tetherto/wdk-wallet/protocols").BridgeResult;
+export type SwidgeSupportedChain = import("@tetherto/wdk-wallet/protocols").SwidgeSupportedChain;
+export type SwidgeSupportedToken = import("@tetherto/wdk-wallet/protocols").SwidgeSupportedToken;
+export type SwidgeSupportedTokensOptions = import("@tetherto/wdk-wallet/protocols").SwidgeSupportedTokensOptions;
 export type IWalletAccount = import("@tetherto/wdk-wallet").IWalletAccount;
 export type IWalletAccountReadOnly = import("@tetherto/wdk-wallet").IWalletAccountReadOnly;
 /**
@@ -95,79 +98,6 @@ export type SolanaGaslessWalletPaymasterConfigOverrides = {
      * - The maximum fee amount for sendTransaction and signTransaction operations.
      */
     transactionMaxFee?: number | bigint;
-};
-/**
- * A chain supported by the protocol, in the canonical WDK swidge shape.
- *
- * Mirrors `SwidgeSupportedChain` from `@tetherto/wdk-wallet/protocols`; declared locally until the swidge migration.
- */
-export type SwidgeSupportedChain = {
-    /**
-     * - The provider-specific chain identifier.
-     */
-    id: string | number;
-    /**
-     * - The human-readable chain name.
-     */
-    name: string;
-    /**
-     * - The chain or virtual machine type (e.g., 'evm', 'svm', 'ton', 'tvm').
-     */
-    type: string;
-    /**
-     * - The symbol of the chain's native token.
-     */
-    nativeToken: string;
-};
-/**
- * A token supported by the protocol, in the canonical WDK swidge shape.
- *
- * Mirrors `SwidgeSupportedToken` from `@tetherto/wdk-wallet/protocols`; declared locally until the swidge migration.
- */
-export type SwidgeSupportedToken = {
-    /**
-     * - The provider-specific token identifier to use in operations.
-     */
-    token: string;
-    /**
-     * - The chain on which the token is available.
-     */
-    chain: string | number;
-    /**
-     * - The token symbol.
-     */
-    symbol: string;
-    /**
-     * - The number of decimal places for the token's base unit.
-     */
-    decimals: number;
-    /**
-     * - The token contract address, if applicable.
-     */
-    address?: string;
-    /**
-     * - The token's full name.
-     */
-    name?: string;
-};
-/**
- * Optional filters for chain- or route-scoped token discovery.
- *
- * Mirrors `SwidgeSupportedTokensOptions` from `@tetherto/wdk-wallet/protocols`; declared locally until the swidge migration.
- */
-export type SwidgeSupportedTokensOptions = {
-    /**
-     * - The optional source chain for route-scoped discovery.
-     */
-    fromChain?: string | number;
-    /**
-     * - The optional source token for route-scoped discovery.
-     */
-    fromToken?: string;
-    /**
-     * - The optional destination chain for route-scoped discovery.
-     */
-    toChain?: string | number;
 };
 export type BridgeOptions = {
     /**

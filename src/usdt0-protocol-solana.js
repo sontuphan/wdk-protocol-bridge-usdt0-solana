@@ -61,6 +61,9 @@ import {
 
 /** @typedef {import('@tetherto/wdk-wallet/protocols').BridgeProtocolConfig} BridgeProtocolConfig */
 /** @typedef {import('@tetherto/wdk-wallet/protocols').BridgeResult} BridgeResult */
+/** @typedef {import('@tetherto/wdk-wallet/protocols').SwidgeSupportedChain} SwidgeSupportedChain */
+/** @typedef {import('@tetherto/wdk-wallet/protocols').SwidgeSupportedToken} SwidgeSupportedToken */
+/** @typedef {import('@tetherto/wdk-wallet/protocols').SwidgeSupportedTokensOptions} SwidgeSupportedTokensOptions */
 
 /** @typedef {import('@tetherto/wdk-wallet').IWalletAccount} IWalletAccount */
 /** @typedef {import('@tetherto/wdk-wallet').IWalletAccountReadOnly} IWalletAccountReadOnly */
@@ -83,43 +86,6 @@ import {
 const SEND_COMPUTE_UNIT_LIMIT = 400_000
 
 const U64_MAX = 0xffffffffffffffffn
-
-/**
- * A chain supported by the protocol, in the canonical WDK swidge shape.
- *
- * Mirrors `SwidgeSupportedChain` from `@tetherto/wdk-wallet/protocols`; declared locally until the swidge migration.
- *
- * @typedef {Object} SwidgeSupportedChain
- * @property {string | number} id - The provider-specific chain identifier.
- * @property {string} name - The human-readable chain name.
- * @property {string} type - The chain or virtual machine type (e.g., 'evm', 'svm', 'ton', 'tvm').
- * @property {string} nativeToken - The symbol of the chain's native token.
- */
-
-/**
- * A token supported by the protocol, in the canonical WDK swidge shape.
- *
- * Mirrors `SwidgeSupportedToken` from `@tetherto/wdk-wallet/protocols`; declared locally until the swidge migration.
- *
- * @typedef {Object} SwidgeSupportedToken
- * @property {string} token - The provider-specific token identifier to use in operations.
- * @property {string | number} chain - The chain on which the token is available.
- * @property {string} symbol - The token symbol.
- * @property {number} decimals - The number of decimal places for the token's base unit.
- * @property {string} [address] - The token contract address, if applicable.
- * @property {string} [name] - The token's full name.
- */
-
-/**
- * Optional filters for chain- or route-scoped token discovery.
- *
- * Mirrors `SwidgeSupportedTokensOptions` from `@tetherto/wdk-wallet/protocols`; declared locally until the swidge migration.
- *
- * @typedef {Object} SwidgeSupportedTokensOptions
- * @property {string | number} [fromChain] - The optional source chain for route-scoped discovery.
- * @property {string} [fromToken] - The optional source token for route-scoped discovery.
- * @property {string | number} [toChain] - The optional destination chain for route-scoped discovery.
- */
 
 /**
  * @typedef {object} BridgeOptions
