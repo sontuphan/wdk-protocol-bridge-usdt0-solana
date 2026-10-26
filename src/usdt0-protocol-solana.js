@@ -480,9 +480,12 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     const [sendLibraryConfigAccount, defaultSendLibraryConfigAccount, sendConfigAccount, defaultSendConfigAccount, ulnAccount] =
       await this._fetchAccounts([sendLibraryConfig, defaultSendLibraryConfig, sendConfig, defaultSendConfig, uln])
 
-    if (!sendLibraryConfigAccount.exists || !defaultSendLibraryConfigAccount.exists ||
-        sendLibraryConfigAccount.programAddress !== endpoint || defaultSendLibraryConfigAccount.programAddress !== endpoint) {
+    if (!sendLibraryConfigAccount.exists || !defaultSendLibraryConfigAccount.exists) {
       throw new Error('LayerZero send library not initialized.')
+    }
+
+    if (sendLibraryConfigAccount.programAddress !== endpoint || defaultSendLibraryConfigAccount.programAddress !== endpoint) {
+      throw new Error('LayerZero send library config owned by another program.')
     }
 
     let { messageLib } = decodeAccount(sendLibraryConfigAccount, sendLibraryConfigDecoder).data
@@ -495,9 +498,12 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       throw new Error('Unsupported LayerZero message library.')
     }
 
-    if (!defaultSendConfigAccount.exists || !ulnAccount.exists ||
-        [defaultSendConfigAccount, ulnAccount, ...(sendConfigAccount.exists ? [sendConfigAccount] : [])].some((account) => account.programAddress !== LAYERZERO_ULN_PROGRAM)) {
+    if (!defaultSendConfigAccount.exists || !ulnAccount.exists) {
       throw new Error('LayerZero ULN send config not initialized.')
+    }
+
+    if ([defaultSendConfigAccount, ulnAccount, ...(sendConfigAccount.exists ? [sendConfigAccount] : [])].some((account) => account.programAddress !== LAYERZERO_ULN_PROGRAM)) {
+      throw new Error('LayerZero ULN account owned by another program.')
     }
 
     const defaults = decodeAccount(defaultSendConfigAccount, ulnSendConfigDecoder).data

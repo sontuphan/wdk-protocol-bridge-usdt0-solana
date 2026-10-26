@@ -148,9 +148,14 @@ describe('_quoteOftSend', () => {
     await expect(quote()).rejects.toThrow('Unsupported LayerZero message library.')
   })
 
+  test('rejects a route with a missing send library config', async () => {
+    delete accounts[SEND_LIBRARY_CONFIG]
+    await expect(quote()).rejects.toThrow('LayerZero send library not initialized.')
+  })
+
   test('rejects a send library config owned by another program', async () => {
     accounts[SEND_LIBRARY_CONFIG] = { ...accounts[SEND_LIBRARY_CONFIG], owner: PAYER }
-    await expect(quote()).rejects.toThrow('LayerZero send library not initialized.')
+    await expect(quote()).rejects.toThrow('LayerZero send library config owned by another program.')
   })
 
   test('rejects a worker config with another discriminator', async () => {
@@ -186,6 +191,11 @@ describe('_quoteOftSend', () => {
     await quote()
     expect(simulated().ix.accounts.slice(3).map(account => account.address))
       .toEqual([...FIXTURE.quoteAccounts, dvnProgram, optionalDvn, priceFeedProgram, priceFeed])
+  })
+
+  test('rejects a ULN settings account owned by another program', async () => {
+    accounts[ULN_SETTINGS] = { ...accounts[ULN_SETTINGS], owner: PAYER }
+    await expect(quote()).rejects.toThrow('LayerZero ULN account owned by another program.')
   })
 
   test('rejects a route with a missing ULN settings account', async () => {
