@@ -14,7 +14,13 @@
 
 'use strict'
 
-import { BridgeProtocol } from '@tetherto/wdk-wallet/protocols'
+import {
+  AccountRequiredError,
+  BridgeProtocol,
+  MaximumFeeExceededError,
+  ProviderRequiredError,
+  ValueError
+} from '@tetherto/wdk-wallet/protocols'
 import { validateEVMAddress, validateTonAddress, validateTronAddress } from '@tetherto/wdk-utils'
 
 import { Options, addressToBytes32 } from '@layerzerolabs/lz-v2-utilities'
@@ -129,14 +135,19 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
    *   gasless account it caps 'bridgeFee' alone, and 'transactionMaxFee' caps 'fee', the paymaster fee in the
    *   paymaster token, which includes the layerzero fee.
    * @returns {Promise<BridgeResult>} The bridge's result.
+   * @throws {AccountRequiredError} If the protocol has been initialized with a read-only account.
+   * @throws {ProviderRequiredError} If the wallet is not connected to a provider.
+   * @throws {ValueError} If the target chain, token, amount or recipient is not valid.
+   * @throws {MaximumFeeExceededError} If the bridge's costs exceed 'bridgeMaxFee', or a gasless account's
+   *   paymaster fee exceeds 'transactionMaxFee'.
    */
   async bridge (options, config) {
     if (typeof this._account.sendTransaction !== 'function') {
-      throw new Error("The 'bridge(options)' method requires the protocol to be initialized with a non read-only account.")
+      throw new AccountRequiredError("The 'bridge(options)' method requires the protocol to be initialized with a non read-only account.")
     }
 
     if (!this._account._rpc) {
-      throw new Error('The wallet must be connected to a provider in order to perform bridge operations.')
+      throw new ProviderRequiredError('The wallet must be connected to a provider in order to perform bridge operations.')
     }
 
     const { bridgeMaxFee = this._config.bridgeMaxFee, ...accountConfig } = config ?? {}
@@ -145,7 +156,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
     if (this._account._config?.paymasterAddress) {
       if (bridgeMaxFee !== undefined && bridgeFee > bridgeMaxFee) {
-        throw new Error('Exceeded maximum fee cost for bridge operation.')
+        throw new MaximumFeeExceededError('Exceeded maximum fee cost for bridge operation.')
       }
 
       const { hash, fee } = await this._account.sendTransaction(tx, accountConfig)
@@ -156,7 +167,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     const { fee } = await this._account.quoteSendTransaction(tx)
 
     if (bridgeMaxFee !== undefined && fee + bridgeFee > bridgeMaxFee) {
-      throw new Error('Exceeded maximum fee cost for bridge operation.')
+      throw new MaximumFeeExceededError('Exceeded maximum fee cost for bridge operation.')
     }
 
     const { hash } = await this._account.sendTransaction(tx)
@@ -172,10 +183,12 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
    * @param {Pick<PaymasterConfigOverrides, 'paymasterToken'>} [config] - If the protocol has been
    *   initialized with a gasless wallet account, it can be used to override its paymaster token.
    * @returns {Promise<Omit<BridgeResult, 'hash'>>} The bridge's quotes.
+   * @throws {ProviderRequiredError} If the wallet is not connected to a provider.
+   * @throws {ValueError} If the target chain, token, amount or recipient is not valid.
    */
   async quoteBridge (options, config) {
     if (!this._account._rpc) {
-      throw new Error('The wallet must be connected to a provider in order to quote bridge operations.')
+      throw new ProviderRequiredError('The wallet must be connected to a provider in order to quote bridge operations.')
     }
 
     const { tx, bridgeFee } = await this._getBridgeTransaction(options)
@@ -270,22 +283,22 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
   /** @private */
   async _getBridgeTransaction ({ targetChain, recipient, token, amount: rawAmount, dstEid }) {
     if (!BLOCKCHAINS[targetChain]) {
-      throw new Error(`Target chain '${targetChain}' not supported.`)
+      throw new ValueError(`Target chain '${targetChain}' not supported.`)
     }
 
     if (targetChain === SOURCE_CHAIN) {
-      throw new Error('The target chain cannot be equal to the source chain.')
+      throw new ValueError('The target chain cannot be equal to the source chain.')
     }
 
     const deployment = Object.values(SOLANA_OFT_DEPLOYMENTS).find(({ mint }) => mint === token)
 
     if (!deployment) {
-      throw new Error(`Token '${token}' not supported on this chain.`)
+      throw new ValueError(`Token '${token}' not supported on this chain.`)
     }
 
     // Numbers above 2^53 cannot hold an exact base-unit amount.
     if (!(typeof rawAmount === 'bigint' || Number.isSafeInteger(rawAmount)) || rawAmount <= 0 || BigInt(rawAmount) > U64_MAX) {
-      throw new Error('The bridge amount must be a positive integer in base units that fits in 64 bits.')
+      throw new ValueError('The bridge amount must be a positive integer in base units that fits in 64 bits.')
     }
 
     const amount = BigInt(rawAmount)
@@ -293,7 +306,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     const to = this._encodeRecipient(targetChain, recipient)
 
     if (to.every((byte) => byte === 0)) {
-      throw new Error(`Invalid recipient address for target chain '${targetChain}': ZERO_ADDRESS.`)
+      throw new ValueError(`Invalid recipient address for target chain '${targetChain}': ZERO_ADDRESS.`)
     }
 
     const eid = dstEid ?? BLOCKCHAINS[targetChain].eid
@@ -603,7 +616,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       const address = Address.parse(recipient)
 
       if (address.workChain !== 0) {
-        throw new Error(`Invalid recipient address for target chain '${targetChain}': UNSUPPORTED_WORKCHAIN.`)
+        throw new ValueError(`Invalid recipient address for target chain '${targetChain}': UNSUPPORTED_WORKCHAIN.`)
       }
 
       return new Uint8Array(address.hash)
@@ -616,7 +629,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       const bytes = getBase58Encoder().encode(recipient).slice(0, 21)
 
       if (bytes.slice(1).every((byte) => byte === 0)) {
-        throw new Error(`Invalid recipient address for target chain '${targetChain}': ZERO_ADDRESS.`)
+        throw new ValueError(`Invalid recipient address for target chain '${targetChain}': ZERO_ADDRESS.`)
       }
 
       return padLeftEncoder(getBytesEncoder(), 32 - bytes.length).encode(bytes)
@@ -628,13 +641,13 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       return addressToBytes32(recipient)
     }
 
-    throw new Error(`Target chain '${targetChain}' not supported.`)
+    throw new ValueError(`Target chain '${targetChain}' not supported.`)
   }
 
   /** @private */
   _assertValidRecipient (result, targetChain) {
     if (!result.success) {
-      throw new Error(`Invalid recipient address for target chain '${targetChain}': ${result.reason}.`)
+      throw new ValueError(`Invalid recipient address for target chain '${targetChain}': ${result.reason}.`)
     }
   }
 }

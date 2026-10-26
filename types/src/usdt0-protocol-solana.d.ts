@@ -13,6 +13,11 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
      *   gasless account it caps 'bridgeFee' alone, and 'transactionMaxFee' caps 'fee', the paymaster fee in the
      *   paymaster token, which includes the layerzero fee.
      * @returns {Promise<BridgeResult>} The bridge's result.
+     * @throws {AccountRequiredError} If the protocol has been initialized with a read-only account.
+     * @throws {ProviderRequiredError} If the wallet is not connected to a provider.
+     * @throws {ValueError} If the target chain, token, amount or recipient is not valid.
+     * @throws {MaximumFeeExceededError} If the bridge's costs exceed 'bridgeMaxFee', or a gasless account's
+     *   paymaster fee exceeds 'transactionMaxFee'.
      */
     bridge(options: BridgeOptions, config?: PaymasterConfigOverrides & Pick<BridgeProtocolConfig, "bridgeMaxFee">): Promise<BridgeResult>;
     /**
@@ -23,6 +28,8 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
      * @param {Pick<PaymasterConfigOverrides, 'paymasterToken'>} [config] - If the protocol has been
      *   initialized with a gasless wallet account, it can be used to override its paymaster token.
      * @returns {Promise<Omit<BridgeResult, 'hash'>>} The bridge's quotes.
+     * @throws {ProviderRequiredError} If the wallet is not connected to a provider.
+     * @throws {ValueError} If the target chain, token, amount or recipient is not valid.
      */
     quoteBridge(options: BridgeOptions, config?: Pick<PaymasterConfigOverrides, "paymasterToken">): Promise<Omit<BridgeResult, "hash">>;
     /**

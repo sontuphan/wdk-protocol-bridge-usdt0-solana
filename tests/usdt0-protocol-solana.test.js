@@ -6,6 +6,7 @@ import { getBase16Decoder, getBase64Encoder } from '@solana/codecs'
 import { decompileTransactionMessage, getCompiledTransactionMessageDecoder } from '@solana/transaction-messages'
 import { getTransactionDecoder } from '@solana/transactions'
 
+import { AccountRequiredError, MaximumFeeExceededError, ProviderRequiredError, ValueError } from '@tetherto/wdk-wallet/protocols'
 import { WalletAccountReadOnlySolanaGasless, WalletAccountSolanaGasless } from '@tetherto/wdk-wallet-solana-gasless'
 
 import { Address } from '@ton/core'
@@ -105,7 +106,7 @@ describe('Usdt0ProtocolSolana', () => {
       jest.spyOn(protocol, '_buildOftSendInstructions').mockResolvedValue([INSTRUCTION])
 
       await expect(protocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 100 }))
-        .rejects.toThrow('Exceeded maximum fee cost for bridge operation.')
+        .rejects.toStrictEqual(new MaximumFeeExceededError('Exceeded maximum fee cost for bridge operation.'))
     })
 
     test('should apply a bridgeMaxFee override', async () => {
@@ -115,7 +116,7 @@ describe('Usdt0ProtocolSolana', () => {
       jest.spyOn(protocol, '_buildOftSendInstructions').mockResolvedValue([INSTRUCTION])
 
       await expect(protocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 100 }, { bridgeMaxFee: 1_004_999n }))
-        .rejects.toThrow('Exceeded maximum fee cost for bridge operation.')
+        .rejects.toStrictEqual(new MaximumFeeExceededError('Exceeded maximum fee cost for bridge operation.'))
       expect(account.sendTransaction).not.toHaveBeenCalled()
     })
 
@@ -134,34 +135,34 @@ describe('Usdt0ProtocolSolana', () => {
       delete account.sendTransaction
 
       await expect(protocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 100 }))
-        .rejects.toThrow("The 'bridge(options)' method requires the protocol to be initialized with a non read-only account.")
+        .rejects.toStrictEqual(new AccountRequiredError("The 'bridge(options)' method requires the protocol to be initialized with a non read-only account."))
     })
 
     test('should throw if the account is not connected to a provider', async () => {
       delete account._rpc
 
       await expect(protocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 100 }))
-        .rejects.toThrow('The wallet must be connected to a provider in order to perform bridge operations.')
+        .rejects.toStrictEqual(new ProviderRequiredError('The wallet must be connected to a provider in order to perform bridge operations.'))
     })
 
     test('should throw if the target chain is not supported', async () => {
       await expect(protocol.bridge({ targetChain: 'unknown', recipient: EVM_ADDRESS, token: MINT, amount: 100 }))
-        .rejects.toThrow("Target chain 'unknown' not supported.")
+        .rejects.toStrictEqual(new ValueError("Target chain 'unknown' not supported."))
     })
 
     test('should throw if the target chain is solana', async () => {
       await expect(protocol.bridge({ targetChain: 'solana', recipient: SOLANA_ADDRESS, token: MINT, amount: 100 }))
-        .rejects.toThrow('The target chain cannot be equal to the source chain.')
+        .rejects.toStrictEqual(new ValueError('The target chain cannot be equal to the source chain.'))
     })
 
     test('should throw if the token is not supported', async () => {
       await expect(protocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: SOLANA_ADDRESS, amount: 100 }))
-        .rejects.toThrow(`Token '${SOLANA_ADDRESS}' not supported on this chain.`)
+        .rejects.toStrictEqual(new ValueError(`Token '${SOLANA_ADDRESS}' not supported on this chain.`))
     })
 
     test.each([0, -1, 1.5, 2 ** 53, 0n, 2n ** 64n, '100'])('should throw for the invalid amount %p before any rpc call', async (amount) => {
       await expect(protocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount }))
-        .rejects.toThrow('The bridge amount must be a positive integer in base units that fits in 64 bits.')
+        .rejects.toStrictEqual(new ValueError('The bridge amount must be a positive integer in base units that fits in 64 bits.'))
 
       expect(protocol._getOftRoute).not.toHaveBeenCalled()
     })
@@ -223,7 +224,7 @@ describe('Usdt0ProtocolSolana', () => {
       spyOnBridgeSteps(gaslessProtocol)
 
       await expect(gaslessProtocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 100 }, { bridgeMaxFee: 999_999n }))
-        .rejects.toThrow('Exceeded maximum fee cost for bridge operation.')
+        .rejects.toStrictEqual(new MaximumFeeExceededError('Exceeded maximum fee cost for bridge operation.'))
       expect(kora.getPaymentInstruction).not.toHaveBeenCalled()
     })
 
@@ -275,7 +276,7 @@ describe('Usdt0ProtocolSolana', () => {
       delete account._rpc
 
       await expect(protocol.quoteBridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 100 }))
-        .rejects.toThrow('The wallet must be connected to a provider in order to quote bridge operations.')
+        .rejects.toStrictEqual(new ProviderRequiredError('The wallet must be connected to a provider in order to quote bridge operations.'))
     })
   })
 
@@ -295,30 +296,30 @@ describe('Usdt0ProtocolSolana', () => {
     })
 
     test('should throw for invalid recipients', () => {
-      expect(() => encode('arbitrum', 'not-an-address'))
-        .toThrow("Invalid recipient address for target chain 'arbitrum': INVALID_FORMAT.")
+      expect(() => encode('arbitrum', 'not-an-address')).toThrow(ValueError)
+      expect(() => encode('arbitrum', 'not-an-address')).toThrow("Invalid recipient address for target chain 'arbitrum': INVALID_FORMAT.")
     })
 
     test('should throw for the zero address', async () => {
       await expect(protocol.quoteBridge({ targetChain: 'arbitrum', recipient: '0x0000000000000000000000000000000000000000', token: MINT, amount: 100 }))
-        .rejects.toThrow("Invalid recipient address for target chain 'arbitrum': ZERO_ADDRESS.")
+        .rejects.toStrictEqual(new ValueError("Invalid recipient address for target chain 'arbitrum': ZERO_ADDRESS."))
     })
 
     test('should throw for ton addresses outside the base workchain', () => {
       const masterchainAddress = new Address(-1, Buffer.alloc(32, 7)).toString()
 
-      expect(() => encode('ton', masterchainAddress))
-        .toThrow("Invalid recipient address for target chain 'ton': UNSUPPORTED_WORKCHAIN.")
+      expect(() => encode('ton', masterchainAddress)).toThrow(ValueError)
+      expect(() => encode('ton', masterchainAddress)).toThrow("Invalid recipient address for target chain 'ton': UNSUPPORTED_WORKCHAIN.")
     })
 
     test('should throw for the tron zero address', () => {
-      expect(() => encode('tron', 'T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb'))
-        .toThrow("Invalid recipient address for target chain 'tron': ZERO_ADDRESS.")
+      expect(() => encode('tron', 'T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb')).toThrow(ValueError)
+      expect(() => encode('tron', 'T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb')).toThrow("Invalid recipient address for target chain 'tron': ZERO_ADDRESS.")
     })
 
     test('should throw for chains without a recipient encoding', () => {
-      expect(() => encode('solana', SOLANA_ADDRESS))
-        .toThrow("Target chain 'solana' not supported.")
+      expect(() => encode('solana', SOLANA_ADDRESS)).toThrow(ValueError)
+      expect(() => encode('solana', SOLANA_ADDRESS)).toThrow("Target chain 'solana' not supported.")
     })
   })
 
