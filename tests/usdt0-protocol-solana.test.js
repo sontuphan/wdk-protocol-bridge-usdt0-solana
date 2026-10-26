@@ -1,9 +1,22 @@
+import { readFileSync } from 'node:fs'
+
 import { beforeEach, describe, expect, jest, test } from '@jest/globals'
 
 import { findAssociatedTokenPda, getTransferInstruction, TOKEN_PROGRAM_ADDRESS } from '@solana-program/token'
 import { address } from '@solana/addresses'
-import { getBase16Decoder, getBase64Encoder } from '@solana/codecs'
-import { decompileTransactionMessage, getCompiledTransactionMessageDecoder } from '@solana/transaction-messages'
+import {
+  addDecoderSizePrefix,
+  fixDecoderSize,
+  getBase16Decoder,
+  getBase64Encoder,
+  getBytesDecoder,
+  getOptionDecoder,
+  getStructDecoder,
+  getU32Decoder,
+  getU64Decoder
+} from '@solana/codecs'
+import { AccountRole } from '@solana/instructions'
+import { getCompiledTransactionMessageDecoder } from '@solana/transaction-messages'
 import { getTransactionDecoder } from '@solana/transactions'
 
 import { AccountRequiredError, MaximumFeeExceededError, ProviderRequiredError, ValueError } from '@tetherto/wdk-wallet/protocols'
@@ -12,6 +25,11 @@ import { WalletAccountReadOnlySolanaGasless, WalletAccountSolanaGasless } from '
 import { Address } from '@ton/core'
 
 import Usdt0ProtocolSolana from '../index.js'
+import { SOLANA_OFT_DEPLOYMENTS } from '../src/config.js'
+
+const FIXTURE = JSON.parse(readFileSync(new URL('./fixtures/mainnet-arbitrum-route.json', import.meta.url), 'utf8'))
+
+const DEPLOYMENT = SOLANA_OFT_DEPLOYMENTS.USDT0
 
 const SOLANA_ADDRESS = 'HyXJcgYpURfDhgzuyRL7zxP4FhLg7LZQMeDrR4MXZcMN'
 
@@ -23,11 +41,7 @@ const TON_ADDRESS = 'EQAd31gAUhdO0d0NZsNb_cGl_Maa9PSuNhVLE9z8bBSjX6Gq'
 
 const TRON_ADDRESS = 'TFG4wBaDQ8sHWWP1ACeSGnoNR6RRzevLPt'
 
-const toHex = (bytes) => getBase16Decoder().decode(bytes)
-
-const INSTRUCTION = { programAddress: SOLANA_ADDRESS, accounts: [], data: new Uint8Array([1]) }
-
-const ROUTE = { store: { feeBps: 3 } }
+const NATIVE_FEE = 1_000_000n
 
 const SEED_PHRASE = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
 
@@ -35,8 +49,39 @@ const PAYMASTER = 'LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY'
 
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
 
-const RPC = {
-  getLatestBlockhash: () => ({ send: async () => ({ value: { blockhash: SOLANA_ADDRESS, lastValidBlockHeight: 1n } }) })
+const toHex = (bytes) => getBase16Decoder().decode(bytes)
+
+const bytesDecoder = addDecoderSizePrefix(getBytesDecoder(), getU32Decoder())
+
+const sendDataDecoder = getStructDecoder([
+  ['discriminator', fixDecoderSize(getBytesDecoder(), 8)],
+  ['dstEid', getU32Decoder()],
+  ['to', fixDecoderSize(getBytesDecoder(), 32)],
+  ['amountLD', getU64Decoder()],
+  ['minAmountLD', getU64Decoder()],
+  ['extraOptions', bytesDecoder],
+  ['composeMsg', getOptionDecoder(bytesDecoder)],
+  ['nativeFee', getU64Decoder()],
+  ['lzTokenFee', getU64Decoder()]
+])
+
+const createRpc = () => {
+  const messagingFee = Buffer.alloc(16)
+  messagingFee.writeBigUInt64LE(NATIVE_FEE)
+
+  return {
+    getMultipleAccounts: jest.fn(keys => ({
+      send: async () => ({
+        value: keys.map(key => FIXTURE.accounts[key]
+          ? { ...FIXTURE.accounts[key], data: [FIXTURE.accounts[key].data, 'base64'], lamports: 1n, executable: false }
+          : null)
+      })
+    })),
+    simulateTransaction: jest.fn(() => ({
+      send: async () => ({ value: { err: null, returnData: { programId: DEPLOYMENT.programId, data: [messagingFee.toString('base64'), 'base64'] } } })
+    })),
+    getLatestBlockhash: () => ({ send: async () => ({ value: { blockhash: SOLANA_ADDRESS, lastValidBlockHeight: 1n } }) })
+  }
 }
 
 const createKora = (fee) => ({
@@ -50,53 +95,52 @@ const createKora = (fee) => ({
 
 const decodeWireTransaction = (transaction) => {
   const { messageBytes, signatures } = getTransactionDecoder().decode(getBase64Encoder().encode(transaction))
-  return { message: decompileTransactionMessage(getCompiledTransactionMessageDecoder().decode(messageBytes)), signatures }
+  const message = getCompiledTransactionMessageDecoder().decode(messageBytes)
+  return { feePayer: message.staticAccounts[0], programs: message.instructions.map(({ programAddressIndex }) => message.staticAccounts[programAddressIndex]), signatures }
 }
 
+const simulatedFeePayer = (rpc) => decodeWireTransaction(rpc.simulateTransaction.mock.calls[0][0]).feePayer
+
+const oftSend = (tx) => {
+  const instruction = tx.instructions.find(({ programAddress }) => programAddress === DEPLOYMENT.programId)
+  return { instruction, data: sendDataDecoder.decode(instruction.data) }
+}
+
+const signerOf = (instruction, role) => instruction.accounts.filter((account) => account.role === role).map((account) => account.address)
+
 describe('Usdt0ProtocolSolana', () => {
-  let account, protocol
+  let rpc, account, protocol
 
   beforeEach(() => {
+    rpc = createRpc()
+
     account = {
-      _rpc: {},
+      _rpc: rpc,
       getAddress: jest.fn().mockResolvedValue(SOLANA_ADDRESS),
       quoteSendTransaction: jest.fn().mockResolvedValue({ fee: 5_000n }),
       sendTransaction: jest.fn().mockResolvedValue({ hash: 'dummy-signature', fee: 5_000n })
     }
 
     protocol = new Usdt0ProtocolSolana(account)
-
-    jest.spyOn(protocol, '_getOftRoute').mockResolvedValue(ROUTE)
-    jest.spyOn(protocol, '_quoteOftSend').mockResolvedValue({ nativeFee: 1_000_000n, lzTokenFee: 0n })
-    jest.spyOn(protocol, '_buildOftSendInstructions').mockResolvedValue([INSTRUCTION])
   })
 
   describe('bridge', () => {
     test('should successfully perform a bridge operation', async () => {
       const result = await protocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 1_000_000 })
 
-      expect(result).toEqual({ hash: 'dummy-signature', fee: 5_000n, bridgeFee: 1_000_000n })
+      expect(result).toEqual({ hash: 'dummy-signature', fee: 5_000n, bridgeFee: NATIVE_FEE })
+      expect(simulatedFeePayer(rpc)).toBe(SOLANA_ADDRESS)
 
       const [tx] = account.sendTransaction.mock.calls[0]
-      expect(tx.instructions).toEqual([INSTRUCTION])
-
-      const [nativeFee, sender, , route, sendParam] = protocol._buildOftSendInstructions.mock.calls[0]
-      expect(route).toBe(ROUTE)
-      expect(protocol._quoteOftSend).toHaveBeenCalledWith(SOLANA_ADDRESS, ROUTE, sendParam)
-      expect(protocol._buildOftSendInstructions.mock.calls[0][2]).toBe(SOLANA_ADDRESS)
-      expect(sendParam.dstEid).toBe(30_110)
-      expect(sendParam.amountLD).toBe(1_000_000n)
-      // The 3 bps store fee is 300, so exactly the rest must arrive.
-      expect(sendParam.minAmountLD).toBe(999_700n)
-      expect(nativeFee).toBe(1_000_000n)
-      expect(sender).toBe(SOLANA_ADDRESS)
+      const { instruction, data } = oftSend(tx)
+      expect(instruction.accounts[0]).toEqual({ address: SOLANA_ADDRESS, role: AccountRole.READONLY_SIGNER })
+      expect(signerOf(instruction, AccountRole.WRITABLE_SIGNER)).toEqual([SOLANA_ADDRESS])
+      expect(data).toMatchObject({ dstEid: 30_110, amountLD: 1_000_000n, minAmountLD: 999_700n, nativeFee: NATIVE_FEE, lzTokenFee: 0n })
+      expect(toHex(data.to)).toBe('000000000000000000000000a460aebce0d3a4becad8ccf9d6d4861296c503bd')
     })
 
     test('should throw if the bridge cost exceeds the bridge max fee', async () => {
       protocol = new Usdt0ProtocolSolana(account, { bridgeMaxFee: 1_000_000n })
-      jest.spyOn(protocol, '_getOftRoute').mockResolvedValue(ROUTE)
-      jest.spyOn(protocol, '_quoteOftSend').mockResolvedValue({ nativeFee: 1_000_000n, lzTokenFee: 0n })
-      jest.spyOn(protocol, '_buildOftSendInstructions').mockResolvedValue([INSTRUCTION])
 
       await expect(protocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 100 }))
         .rejects.toStrictEqual(new MaximumFeeExceededError('Exceeded maximum fee cost for bridge operation.'))
@@ -104,9 +148,6 @@ describe('Usdt0ProtocolSolana', () => {
 
     test('should apply a bridgeMaxFee override', async () => {
       protocol = new Usdt0ProtocolSolana(account, { bridgeMaxFee: 10_000_000n })
-      jest.spyOn(protocol, '_getOftRoute').mockResolvedValue(ROUTE)
-      jest.spyOn(protocol, '_quoteOftSend').mockResolvedValue({ nativeFee: 1_000_000n, lzTokenFee: 0n })
-      jest.spyOn(protocol, '_buildOftSendInstructions').mockResolvedValue([INSTRUCTION])
 
       await expect(protocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 100 }, { bridgeMaxFee: 1_004_999n }))
         .rejects.toStrictEqual(new MaximumFeeExceededError('Exceeded maximum fee cost for bridge operation.'))
@@ -115,13 +156,10 @@ describe('Usdt0ProtocolSolana', () => {
 
     test('should allow a bridge cost equal to the bridge max fee', async () => {
       protocol = new Usdt0ProtocolSolana(account, { bridgeMaxFee: 1_005_000n })
-      jest.spyOn(protocol, '_getOftRoute').mockResolvedValue(ROUTE)
-      jest.spyOn(protocol, '_quoteOftSend').mockResolvedValue({ nativeFee: 1_000_000n, lzTokenFee: 0n })
-      jest.spyOn(protocol, '_buildOftSendInstructions').mockResolvedValue([INSTRUCTION])
 
       const result = await protocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 100 })
 
-      expect(result).toEqual({ hash: 'dummy-signature', fee: 5_000n, bridgeFee: 1_000_000n })
+      expect(result).toEqual({ hash: 'dummy-signature', fee: 5_000n, bridgeFee: NATIVE_FEE })
     })
 
     test('should throw if the account is read-only', async () => {
@@ -162,27 +200,21 @@ describe('Usdt0ProtocolSolana', () => {
       await expect(protocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount }))
         .rejects.toStrictEqual(new ValueError('The bridge amount must be a positive integer in base units that fits in 64 bits.'))
 
-      expect(protocol._getOftRoute).not.toHaveBeenCalled()
+      expect(rpc.getMultipleAccounts).not.toHaveBeenCalled()
     })
 
     test('should accept the largest u64 amount as a bigint', async () => {
       await protocol.quoteBridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 2n ** 64n - 1n })
 
-      const [, , , , sendParam] = protocol._buildOftSendInstructions.mock.calls[0]
-      expect(sendParam.amountLD).toBe(2n ** 64n - 1n)
+      const [tx] = account.quoteSendTransaction.mock.calls[0]
+      expect(oftSend(tx).data.amountLD).toBe(2n ** 64n - 1n)
     })
   })
 
   describe('gasless accounts', () => {
     let kora
 
-    const createGaslessConfig = () => ({ provider: RPC, paymasterUrl: kora, paymasterAddress: PAYMASTER, paymasterToken: { address: MINT } })
-
-    const spyOnBridgeSteps = (gaslessProtocol) => {
-      jest.spyOn(gaslessProtocol, '_getOftRoute').mockResolvedValue(ROUTE)
-      jest.spyOn(gaslessProtocol, '_quoteOftSend').mockResolvedValue({ nativeFee: 1_000_000n, lzTokenFee: 0n })
-      jest.spyOn(gaslessProtocol, '_buildOftSendInstructions').mockResolvedValue([INSTRUCTION])
-    }
+    const createGaslessConfig = () => ({ provider: rpc, paymasterUrl: kora, paymasterAddress: PAYMASTER, paymasterToken: { address: MINT } })
 
     beforeEach(() => {
       kora = createKora(250_000n)
@@ -191,17 +223,14 @@ describe('Usdt0ProtocolSolana', () => {
     test('should bridge through the kora paymaster, which pays the layerzero fee, with the paymaster overrides', async () => {
       const gaslessAccount = new WalletAccountSolanaGasless(SEED_PHRASE, "0'/0'", createGaslessConfig())
       const gaslessProtocol = new Usdt0ProtocolSolana(gaslessAccount, { bridgeMaxFee: 1n })
-      spyOnBridgeSteps(gaslessProtocol)
 
       const result = await gaslessProtocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 1_000_000 },
         { paymasterToken: { address: USDC_MINT }, transactionMaxFee: 250_000n, bridgeMaxFee: 1_000_000n })
 
-      expect(result).toEqual({ hash: 'gasless-signature', fee: 250_000n, bridgeFee: 1_000_000n })
+      expect(result).toEqual({ hash: 'gasless-signature', fee: 250_000n, bridgeFee: NATIVE_FEE })
+      expect(simulatedFeePayer(rpc)).toBe(PAYMASTER)
 
       const sender = await gaslessAccount.getAddress()
-      const [, builtSender, payer, , sendParam] = gaslessProtocol._buildOftSendInstructions.mock.calls[0]
-      expect([builtSender, payer]).toEqual([sender, PAYMASTER])
-      expect(gaslessProtocol._quoteOftSend).toHaveBeenCalledWith(PAYMASTER, ROUTE, sendParam)
 
       expect(kora.getPaymentInstruction).toHaveBeenCalledTimes(1)
       expect(kora.getPaymentInstruction.mock.calls[0][0]).toMatchObject({ fee_token: USDC_MINT, source_wallet: sender, signer_key: PAYMASTER })
@@ -209,9 +238,9 @@ describe('Usdt0ProtocolSolana', () => {
       const [{ transaction, signer_key: signerKey }] = kora.signAndSendTransaction.mock.calls[0]
       expect(signerKey).toBe(PAYMASTER)
 
-      const { message, signatures } = decodeWireTransaction(transaction)
-      expect(message.feePayer.address).toBe(PAYMASTER)
-      expect(message.instructions.map(({ programAddress }) => programAddress)).toEqual([SOLANA_ADDRESS, TOKEN_PROGRAM_ADDRESS])
+      const { feePayer, programs, signatures } = decodeWireTransaction(transaction)
+      expect(feePayer).toBe(PAYMASTER)
+      expect(programs.slice(-2)).toEqual([DEPLOYMENT.programId, TOKEN_PROGRAM_ADDRESS])
       expect(signatures[PAYMASTER]).toBeNull()
       expect(signatures[sender]).toHaveLength(64)
     })
@@ -219,7 +248,6 @@ describe('Usdt0ProtocolSolana', () => {
     test('should cap the bridge fee alone with bridgeMaxFee before contacting the paymaster', async () => {
       const gaslessAccount = new WalletAccountSolanaGasless(SEED_PHRASE, "0'/0'", createGaslessConfig())
       const gaslessProtocol = new Usdt0ProtocolSolana(gaslessAccount)
-      spyOnBridgeSteps(gaslessProtocol)
 
       await expect(gaslessProtocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 100 }, { bridgeMaxFee: 999_999n }))
         .rejects.toStrictEqual(new MaximumFeeExceededError('Exceeded maximum fee cost for bridge operation.'))
@@ -229,7 +257,6 @@ describe('Usdt0ProtocolSolana', () => {
     test('should cap the paymaster fee with the transactionMaxFee override', async () => {
       const gaslessAccount = new WalletAccountSolanaGasless(SEED_PHRASE, "0'/0'", createGaslessConfig())
       const gaslessProtocol = new Usdt0ProtocolSolana(gaslessAccount)
-      spyOnBridgeSteps(gaslessProtocol)
 
       await expect(gaslessProtocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 100 }, { transactionMaxFee: 249_999n }))
         .rejects.toThrow('Exceeded maximum fee cost for transaction operation.')
@@ -241,33 +268,33 @@ describe('Usdt0ProtocolSolana', () => {
 
       await protocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 100 })
 
-      expect(protocol._quoteOftSend.mock.calls[0][0]).toBe(PAYMASTER)
-      expect(protocol._buildOftSendInstructions.mock.calls[0][2]).toBe(PAYMASTER)
+      expect(simulatedFeePayer(rpc)).toBe(PAYMASTER)
+
+      const [tx] = account.sendTransaction.mock.calls[0]
+      expect(signerOf(oftSend(tx).instruction, AccountRole.WRITABLE_SIGNER)).toEqual([PAYMASTER])
       expect(account.quoteSendTransaction).not.toHaveBeenCalled()
     })
 
     test('should quote from a read-only gasless account with the paymaster as the payer', async () => {
       const readOnlyAccount = new WalletAccountReadOnlySolanaGasless(SOLANA_ADDRESS, createGaslessConfig())
       const gaslessProtocol = new Usdt0ProtocolSolana(readOnlyAccount)
-      spyOnBridgeSteps(gaslessProtocol)
 
-      expect(await gaslessProtocol.quoteBridge({ targetChain: 'ton', recipient: TON_ADDRESS, token: MINT, amount: 100 }, { paymasterToken: { address: USDC_MINT } }))
-        .toEqual({ fee: 250_000n, bridgeFee: 1_000_000n })
-
-      const [, sender, payer] = gaslessProtocol._buildOftSendInstructions.mock.calls[0]
-      expect([sender, payer]).toEqual([SOLANA_ADDRESS, PAYMASTER])
+      expect(await gaslessProtocol.quoteBridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 100 }, { paymasterToken: { address: USDC_MINT } }))
+        .toEqual({ fee: 250_000n, bridgeFee: NATIVE_FEE })
+      expect(simulatedFeePayer(rpc)).toBe(PAYMASTER)
 
       const [{ transaction, fee_token: feeToken }] = kora.getPaymentInstruction.mock.calls[0]
       expect(feeToken).toBe(USDC_MINT)
-      expect(decodeWireTransaction(transaction).message.feePayer.address).toBe(PAYMASTER)
+      expect(decodeWireTransaction(transaction).feePayer).toBe(PAYMASTER)
     })
   })
 
   describe('quoteBridge', () => {
     test('should successfully quote a bridge operation', async () => {
-      const result = await protocol.quoteBridge({ targetChain: 'ton', recipient: TON_ADDRESS, token: MINT, amount: 100 })
+      const result = await protocol.quoteBridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 100 })
 
-      expect(result).toEqual({ fee: 5_000n, bridgeFee: 1_000_000n })
+      expect(result).toEqual({ fee: 5_000n, bridgeFee: NATIVE_FEE })
+      expect(simulatedFeePayer(rpc)).toBe(SOLANA_ADDRESS)
     })
 
     test('should throw if the account is not connected to a provider', async () => {
