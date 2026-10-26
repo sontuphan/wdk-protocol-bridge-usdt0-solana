@@ -46,6 +46,8 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     /** @private */
     private _resolveChainKey;
     /** @private */
+    private _getPaymasterAddress;
+    /** @private */
     private _getBridgeTransaction;
     /** @private */
     private _quoteOftSend;

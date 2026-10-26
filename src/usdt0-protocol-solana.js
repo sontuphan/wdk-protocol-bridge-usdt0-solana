@@ -152,7 +152,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
     const { tx, bridgeFee } = await this._getBridgeTransaction(options)
 
-    if (this._account._config?.paymasterAddress) {
+    if (this._getPaymasterAddress()) {
       if (bridgeMaxFee !== undefined && bridgeFee > bridgeMaxFee) {
         throw new MaximumFeeExceededError('Exceeded maximum fee cost for bridge operation.')
       }
@@ -279,6 +279,13 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
   }
 
   /** @private */
+  _getPaymasterAddress () {
+    const paymasterAddress = this._account._config?.paymasterAddress
+
+    return paymasterAddress ? address(paymasterAddress) : undefined
+  }
+
+  /** @private */
   async _getBridgeTransaction ({ targetChain, recipient, token, amount: rawAmount }) {
     if (!Object.prototype.hasOwnProperty.call(BLOCKCHAINS, targetChain)) {
       throw new ValueError(`Target chain '${targetChain}' not supported.`)
@@ -325,7 +332,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
     const sender = address(await this._account.getAddress())
 
-    const payer = this._account._config?.paymasterAddress ? address(this._account._config.paymasterAddress) : sender
+    const payer = this._getPaymasterAddress() ?? sender
 
     const { nativeFee: bridgeFee } = await this._quoteOftSend(route, sendParam, payer)
 
