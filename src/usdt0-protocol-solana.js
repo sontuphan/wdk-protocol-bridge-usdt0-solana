@@ -286,6 +286,11 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
   }
 
   /** @private */
+  async _fetchAccounts (addresses) {
+    return await fetchEncodedAccounts(this._account._rpc, addresses, { commitment: this._account._commitment })
+  }
+
+  /** @private */
   async _getBridgeTransaction ({ targetChain, recipient, token, amount: rawAmount }) {
     if (!Object.prototype.hasOwnProperty.call(BLOCKCHAINS, targetChain)) {
       throw new ValueError(`Target chain '${targetChain}' not supported.`)
@@ -395,7 +400,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
     const [peer, credits] = await Promise.all([getPeerAddress(programAddress, dstEid), getCreditsAddress(programAddress)])
 
-    const [storeAccount, peerAccount] = await fetchEncodedAccounts(this._account._rpc, [oftStore, peer], { commitment: this._account._commitment })
+    const [storeAccount, peerAccount] = await this._fetchAccounts([oftStore, peer])
 
     const store = parseOftStore(programAddress, storeAccount)
 
@@ -413,7 +418,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     const lookupTables = {}
 
     if (store.alt) {
-      const [table] = await fetchEncodedAccounts(this._account._rpc, [store.alt], { commitment: this._account._commitment })
+      const [table] = await this._fetchAccounts([store.alt])
 
       if (!table.exists || table.programAddress !== ADDRESS_LOOKUP_TABLE_PROGRAM_ADDRESS) {
         throw new Error('Invalid OFT address lookup table account.')
@@ -440,7 +445,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     ])
 
     const [sendLibraryConfigAccount, defaultSendLibraryConfigAccount, sendConfigAccount, defaultSendConfigAccount, ulnAccount] =
-      await fetchEncodedAccounts(this._account._rpc, [sendLibraryConfig, defaultSendLibraryConfig, sendConfig, defaultSendConfig, uln], { commitment: this._account._commitment })
+      await this._fetchAccounts([sendLibraryConfig, defaultSendLibraryConfig, sendConfig, defaultSendConfig, uln])
 
     if (!sendLibraryConfigAccount.exists || !defaultSendLibraryConfigAccount.exists ||
         sendLibraryConfigAccount.programAddress !== endpoint || defaultSendLibraryConfigAccount.programAddress !== endpoint) {
@@ -474,7 +479,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
     const workers = [executor, ...requiredDvns, ...optionalDvns]
 
-    const workerConfigs = (await fetchEncodedAccounts(this._account._rpc, workers, { commitment: this._account._commitment })).map((config, i) => {
+    const workerConfigs = (await this._fetchAccounts(workers)).map((config, i) => {
       if (!config.exists) {
         throw new Error(`LayerZero worker ${workers[i]} not initialized.`)
       }
@@ -486,7 +491,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       return { program: config.programAddress, priceFeed }
     })
 
-    const priceFeedAccounts = await fetchEncodedAccounts(this._account._rpc, workerConfigs.map(({ priceFeed }) => priceFeed), { commitment: this._account._commitment })
+    const priceFeedAccounts = await this._fetchAccounts(workerConfigs.map(({ priceFeed }) => priceFeed))
 
     const [[sendLibraryInfo], [endpointSettings], [nonce], [endpointEventAuthority], [ulnEventAuthority]] = await Promise.all([
       getProgramDerivedAddress({ programAddress: endpoint, seeds: ['MessageLib', getAddressEncoder().encode(uln)] }),
