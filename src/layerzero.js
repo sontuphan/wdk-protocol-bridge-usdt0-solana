@@ -78,7 +78,6 @@ import {
  * @property {number} bump - The pda bump.
  */
 
-// Anchor discriminators: the first 8 bytes of sha256('account:<name>') or sha256('global:<instruction>').
 const OFT_STORE_DISCRIMINATOR = 'c3d76886b9c3f072'
 
 const PEER_CONFIG_DISCRIMINATOR = 'b59d56c621c15ecb'
@@ -99,15 +98,12 @@ const DVN_CONFIG_DISCRIMINATOR = '31512162eaa85d49'
 
 const addressesDecoder = getArrayDecoder(getAddressDecoder())
 
-// Borsh Vec<u8>.
 const bytesEncoder = addEncoderSizePrefix(getBytesEncoder(), getU32Encoder())
 
 const bytesDecoder = addDecoderSizePrefix(getBytesDecoder(), getU32Decoder())
 
 const composeMsgEncoder = transformEncoder(getOptionEncoder(bytesEncoder), (composeMsg) => composeMsg.length ? composeMsg : null)
 
-// Legacy Mesh account layouts.
-// @see https://github.com/LayerZero-Labs/usdt-native-mesh/tree/4ce9a592e178a333a451a3d464cee3bd782fbaf1/programs/oft/src/state
 const oftStoreDecoder = getStructDecoder([
   ['discriminator', getConstantDecoder(getBase16Encoder().encode(OFT_STORE_DISCRIMINATOR))],
   ['tokenMint', getAddressDecoder()],
@@ -163,7 +159,6 @@ export const messagingFeeDecoder = getStructDecoder([
   ['lzTokenFee', getU64Decoder()]
 ])
 
-// Account layouts from the layerzero idls, decoded up to the last field read; trailing fields are ignored.
 export const ulnSettingsDecoder = getStructDecoder([
   ['discriminator', getConstantDecoder(getBase16Encoder().encode(ULN_SETTINGS_DISCRIMINATOR))],
   ['eid', getU32Decoder()],

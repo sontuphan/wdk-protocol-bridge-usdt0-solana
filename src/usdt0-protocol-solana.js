@@ -297,7 +297,6 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       throw new ValueError(`Token '${token}' not supported on this chain.`)
     }
 
-    // Numbers above 2^53 cannot hold an exact base-unit amount.
     if (!(typeof rawAmount === 'bigint' || Number.isSafeInteger(rawAmount)) || rawAmount <= 0 || BigInt(rawAmount) > U64_MAX) {
       throw new ValueError('The bridge amount must be a positive integer in base units that fits in 64 bits.')
     }
@@ -314,7 +313,6 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
     const route = await this._getOftRoute(deployment, eid)
 
-    // Mirrors the program's debit_view: it takes fee_bps out of the amount, rounded down, and the rest must arrive.
     const oftFee = amount * BigInt(route.store.feeBps) / 10_000n
 
     /** @type {OftSendParam} */
@@ -330,9 +328,6 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
     const sender = address(await this._account.getAddress())
 
-    // A gasless account's kora paymaster pays the transaction and fronts the layerzero fee as its fee payer. Matched by shape, not
-    // instanceof, so accounts from another copy of wdk-wallet-solana-gasless are recognised too.
-    // TODO: read a public paymasterAddress getter here and in 'bridge' once wdk-wallet-solana-gasless exposes one.
     const payer = this._account._config?.paymasterAddress ? address(this._account._config.paymasterAddress) : sender
 
     const { nativeFee: bridgeFee } = await this._quoteOftSend(route, sendParam, payer)
@@ -346,8 +341,6 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
   /** @private */
   async _quoteOftSend (route, sendParam, payer) {
-    // @see https://github.com/LayerZero-Labs/usdt-native-mesh/blob/main/programs/oft/src/instructions/quote_send.rs
-
     if (sendParam.to.length !== 32 || sendParam.oftCmd.length !== 0) {
       throw new Error('Invalid OFT recipient or unsupported OFT command.')
     }
@@ -362,7 +355,6 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       data: quoteSendEncoder.encode({ ...sendParam, payInLzToken: false })
     }
 
-    // No lifetime is set: the message compiles with an empty blockhash, which the rpc replaces during the simulation.
     const message = compressTransactionMessageUsingAddressLookupTables(
       appendTransactionMessageInstructions(
         [getSetComputeUnitLimitInstruction({ units: MAX_COMPUTE_UNIT_LIMIT }), instruction],
@@ -435,9 +427,6 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
   /** @private */
   async _getEndpointAccounts (endpoint, sender, dstEid, receiver, payer) {
-    // Port of SendHelper.getQuoteAccounts and SendHelper.getSendAccounts from @layerzerolabs/lz-solana-sdk-v2,
-    // restricted to the ULN message library: quote accounts without a payer, send accounts with one.
-
     const eid = getU32Encoder({ endian: Endian.Big }).encode(dstEid)
 
     const senderSeed = getAddressEncoder().encode(sender)
@@ -453,7 +442,6 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     const [sendLibraryConfigAccount, defaultSendLibraryConfigAccount, sendConfigAccount, defaultSendConfigAccount, ulnAccount] =
       await fetchEncodedAccounts(this._account._rpc, [sendLibraryConfig, defaultSendLibraryConfig, sendConfig, defaultSendConfig, uln], { commitment: this._account._commitment })
 
-    // The decoders check each account's anchor discriminator, and decodeAccount names the account that fails; owners are checked here.
     if (!sendLibraryConfigAccount.exists || !defaultSendLibraryConfigAccount.exists ||
         sendLibraryConfigAccount.programAddress !== endpoint || defaultSendLibraryConfigAccount.programAddress !== endpoint) {
       throw new Error('LayerZero send library not initialized.')
@@ -461,7 +449,6 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
     let { messageLib } = decodeAccount(sendLibraryConfigAccount, sendLibraryConfigDecoder).data
 
-    // LayerZero marks unset addresses with the all-zero key (PublicKey.default), which is the system program address.
     if (messageLib === SYSTEM_PROGRAM_ADDRESS) {
       messageLib = decodeAccount(defaultSendLibraryConfigAccount, sendLibraryConfigDecoder).data.messageLib
     }
@@ -475,7 +462,6 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       throw new Error('LayerZero ULN send config not initialized.')
     }
 
-    // An oapp send config overrides the default executor when set, and the default dvn sets when non-empty.
     const defaults = decodeAccount(defaultSendConfigAccount, ulnSendConfigDecoder).data
 
     const custom = sendConfigAccount.exists ? decodeAccount(sendConfigAccount, ulnSendConfigDecoder).data : null
@@ -510,7 +496,6 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       getProgramDerivedAddress({ programAddress: LAYERZERO_ULN_PROGRAM, seeds: ['__event_authority'] })
     ])
 
-    // Each worker contributes its program, its config (written to when charged on a send), and its price feed's program and config.
     /** @type {Array<[SolanaAddress, AccountRole?]>} */
     const workerAccounts = workers.flatMap((worker, i) => {
       const priceFeed = priceFeedAccounts[i]
@@ -522,7 +507,6 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       return [[workerConfigs[i].program], [worker, payer ? AccountRole.WRITABLE : AccountRole.READONLY], [priceFeed.programAddress], [priceFeed.address]]
     })
 
-    // The ULN pays its protocol fee to the treasury when one is set, and otherwise takes its own program as a placeholder.
     const treasury = payer && decodeAccount(ulnAccount, ulnSettingsDecoder).data.treasury?.nativeReceiver
 
     /** @type {Array<[SolanaAddress, AccountRole?]>} */
@@ -567,8 +551,6 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
   /** @private */
   async _buildOftSendInstructions (route, sendParam, nativeFee, sender, payer) {
-    // @see https://github.com/LayerZero-Labs/usdt-native-mesh/blob/main/programs/oft/src/instructions/send.rs
-
     const { programAddress, oftStore, peer, credits, store, peerConfig, lookupTables } = route
 
     const [[tokenSource], [eventAuthority], remainingAccounts] = await Promise.all([
@@ -597,7 +579,6 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       data: sendEncoder.encode({ ...sendParam, nativeFee, lzTokenFee: 0n })
     }
 
-    // A send references more accounts than fit in a transaction, so the non-signers are loaded through the store's lookup table.
     return compressTransactionMessageUsingAddressLookupTables(
       appendTransactionMessageInstructions(
         [getSetComputeUnitLimitInstruction({ units: SEND_COMPUTE_UNIT_LIMIT }), instruction],
@@ -626,7 +607,6 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     if (type === 'tvm') {
       this._assertValidRecipient(validateTronAddress(recipient), targetChain)
 
-      // Base58check payload: 0x41 prefix, 20-byte address, 4-byte checksum.
       const bytes = getBase58Encoder().encode(recipient).slice(0, 21)
 
       if (bytes.slice(1).every((byte) => byte === 0)) {
