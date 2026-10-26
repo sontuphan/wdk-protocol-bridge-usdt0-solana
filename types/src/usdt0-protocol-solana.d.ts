@@ -2,24 +2,28 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     /**
      * Bridges a token from solana to a different blockchain.
      *
-     * Gasless accounts pay through their paymaster, which also fronts the layerzero fee and charges it back in the paymaster token.
+     * Gasless accounts pay through their paymaster, which also fronts the layerzero fee and charges it back in the
+     * paymaster token.
      *
-     * @param {BridgeOptions} options - The bridge's options. Optionally pass 'dstEid' to override the destination endpoint id.
-     * @param {SolanaGaslessWalletPaymasterConfigOverrides & Pick<BridgeProtocolConfig, 'bridgeMaxFee'>} [config] - If the protocol has been
-     *   initialized with a gasless wallet account, it can be used to override its paymaster options; 'bridgeMaxFee' overrides the protocol's.
-     *   A gasless account ignores 'bridgeMaxFee': its 'transactionMaxFee' caps the paymaster fee, which includes the layerzero fee.
+     * @param {BridgeOptions} options - The bridge's options. Optionally pass 'dstEid' to override the destination
+     *   endpoint id.
+     * @param {PaymasterConfigOverrides & Pick<BridgeProtocolConfig, 'bridgeMaxFee'>} [config] - If the protocol has
+     *   been initialized with a gasless wallet account, it can be used to override its paymaster options;
+     *   'bridgeMaxFee' overrides the protocol's. A gasless account ignores 'bridgeMaxFee': its 'transactionMaxFee' caps
+     *   the paymaster fee, which includes the layerzero fee.
      * @returns {Promise<BridgeResult>} The bridge's result.
      */
-    bridge(options: BridgeOptions, config?: SolanaGaslessWalletPaymasterConfigOverrides & Pick<BridgeProtocolConfig, "bridgeMaxFee">): Promise<BridgeResult>;
+    bridge(options: BridgeOptions, config?: PaymasterConfigOverrides & Pick<BridgeProtocolConfig, "bridgeMaxFee">): Promise<BridgeResult>;
     /**
      * Quotes the costs of a bridge operation.
      *
-     * @param {BridgeOptions} options - The bridge's options. Optionally pass 'dstEid' to override the destination endpoint id.
-     * @param {Pick<SolanaGaslessWalletPaymasterConfigOverrides, 'paymasterToken'>} [config] - If the protocol has been
+     * @param {BridgeOptions} options - The bridge's options. Optionally pass 'dstEid' to override the destination
+     *   endpoint id.
+     * @param {Pick<PaymasterConfigOverrides, 'paymasterToken'>} [config] - If the protocol has been
      *   initialized with a gasless wallet account, it can be used to override its paymaster token.
      * @returns {Promise<Omit<BridgeResult, 'hash'>>} The bridge's quotes.
      */
-    quoteBridge(options: BridgeOptions, config?: Pick<SolanaGaslessWalletPaymasterConfigOverrides, "paymasterToken">): Promise<Omit<BridgeResult, "hash">>;
+    quoteBridge(options: BridgeOptions, config?: Pick<PaymasterConfigOverrides, "paymasterToken">): Promise<Omit<BridgeResult, "hash">>;
     /**
      * Retrieves the chains supported by the protocol for bridge operations.
      *
@@ -62,7 +66,7 @@ export type SwidgeSupportedTokensOptions = import("@tetherto/wdk-wallet/protocol
 /**
  * The paymaster options a gasless wallet account accepts as overrides.
  */
-export type SolanaGaslessWalletPaymasterConfigOverrides = {
+export type PaymasterConfigOverrides = {
     /**
      * - The paymaster token configuration.
      */
@@ -70,7 +74,8 @@ export type SolanaGaslessWalletPaymasterConfigOverrides = {
         address: string;
     };
     /**
-     * - The maximum fee amount for sendTransaction and signTransaction operations.
+     * - The maximum fee amount for sendTransaction and signTransaction
+     * operations.
      */
     transactionMaxFee?: number | bigint;
 };

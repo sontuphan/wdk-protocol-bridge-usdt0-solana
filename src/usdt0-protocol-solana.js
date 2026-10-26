@@ -68,9 +68,10 @@ import {
 /**
  * The paymaster options a gasless wallet account accepts as overrides.
  *
- * @typedef {Object} SolanaGaslessWalletPaymasterConfigOverrides
+ * @typedef {Object} PaymasterConfigOverrides
  * @property {{ address: string }} [paymasterToken] - The paymaster token configuration.
- * @property {number | bigint} [transactionMaxFee] - The maximum fee amount for sendTransaction and signTransaction operations.
+ * @property {number | bigint} [transactionMaxFee] - The maximum fee amount for sendTransaction and signTransaction
+ *   operations.
  */
 
 /** @typedef {import('@solana/addresses').Address} SolanaAddress */
@@ -117,12 +118,15 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
   /**
    * Bridges a token from solana to a different blockchain.
    *
-   * Gasless accounts pay through their paymaster, which also fronts the layerzero fee and charges it back in the paymaster token.
+   * Gasless accounts pay through their paymaster, which also fronts the layerzero fee and charges it back in the
+   * paymaster token.
    *
-   * @param {BridgeOptions} options - The bridge's options. Optionally pass 'dstEid' to override the destination endpoint id.
-   * @param {SolanaGaslessWalletPaymasterConfigOverrides & Pick<BridgeProtocolConfig, 'bridgeMaxFee'>} [config] - If the protocol has been
-   *   initialized with a gasless wallet account, it can be used to override its paymaster options; 'bridgeMaxFee' overrides the protocol's.
-   *   A gasless account ignores 'bridgeMaxFee': its 'transactionMaxFee' caps the paymaster fee, which includes the layerzero fee.
+   * @param {BridgeOptions} options - The bridge's options. Optionally pass 'dstEid' to override the destination
+   *   endpoint id.
+   * @param {PaymasterConfigOverrides & Pick<BridgeProtocolConfig, 'bridgeMaxFee'>} [config] - If the protocol has
+   *   been initialized with a gasless wallet account, it can be used to override its paymaster options;
+   *   'bridgeMaxFee' overrides the protocol's. A gasless account ignores 'bridgeMaxFee': its 'transactionMaxFee' caps
+   *   the paymaster fee, which includes the layerzero fee.
    * @returns {Promise<BridgeResult>} The bridge's result.
    */
   async bridge (options, config) {
@@ -158,8 +162,9 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
   /**
    * Quotes the costs of a bridge operation.
    *
-   * @param {BridgeOptions} options - The bridge's options. Optionally pass 'dstEid' to override the destination endpoint id.
-   * @param {Pick<SolanaGaslessWalletPaymasterConfigOverrides, 'paymasterToken'>} [config] - If the protocol has been
+   * @param {BridgeOptions} options - The bridge's options. Optionally pass 'dstEid' to override the destination
+   *   endpoint id.
+   * @param {Pick<PaymasterConfigOverrides, 'paymasterToken'>} [config] - If the protocol has been
    *   initialized with a gasless wallet account, it can be used to override its paymaster token.
    * @returns {Promise<Omit<BridgeResult, 'hash'>>} The bridge's quotes.
    */

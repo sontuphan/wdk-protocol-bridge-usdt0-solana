@@ -69,7 +69,12 @@ import {
  *
  * @typedef {Object} PeerConfig
  * @property {ReadonlyUint8Array} peerAddress - The remote peer, encoded as 32 bytes.
- * @property {{ withdrawRemote: ReadonlyUint8Array, sendOft: ReadonlyUint8Array, sendCredits: ReadonlyUint8Array, sendOftAndCall: ReadonlyUint8Array }} enforcedOptions - The enforced options per message type.
+ * @property {{
+ *   withdrawRemote: ReadonlyUint8Array,
+ *   sendOft: ReadonlyUint8Array,
+ *   sendCredits: ReadonlyUint8Array,
+ *   sendOftAndCall: ReadonlyUint8Array
+ * }} enforcedOptions - The enforced options per message type.
  * @property {number} bump - The pda bump.
  */
 
