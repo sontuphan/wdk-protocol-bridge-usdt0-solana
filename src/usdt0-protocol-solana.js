@@ -221,12 +221,17 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
   async getSupportedTokens (options) {
     const { fromChain, toChain, fromToken } = options ?? {}
 
-    const scope = fromChain ?? toChain
-    const chainKey = scope !== undefined ? this._resolveChainKey(scope) : SOURCE_CHAIN
+    const toChainKey = toChain !== undefined ? this._resolveChainKey(toChain) : undefined
 
-    if (!chainKey) {
+    if (fromChain !== undefined && this._resolveChainKey(fromChain) !== SOURCE_CHAIN) {
       return []
     }
+
+    if (toChain !== undefined && (!toChainKey || toChainKey === SOURCE_CHAIN)) {
+      return []
+    }
+
+    const chainKey = fromChain === undefined && toChainKey ? toChainKey : SOURCE_CHAIN
 
     const tokenFilter = fromToken ? String(fromToken).toLowerCase() : undefined
 

@@ -348,6 +348,19 @@ describe('Usdt0ProtocolSolana', () => {
 
     test('should return an empty list for unknown chains', async () => {
       expect(await protocol.getSupportedTokens({ fromChain: 'unknown' })).toEqual([])
+      expect(await protocol.getSupportedTokens({ toChain: 'unknown' })).toEqual([])
+    })
+
+    test('should return an empty list for routes that do not start on solana', async () => {
+      expect(await protocol.getSupportedTokens({ fromChain: 'tron' })).toEqual([])
+      expect(await protocol.getSupportedTokens({ toChain: 'solana' })).toEqual([])
+      expect(await protocol.getSupportedTokens({ fromChain: 'solana', toChain: 'solana' })).toEqual([])
+    })
+
+    test('should return the solana tokens for a route from solana', async () => {
+      const tokens = await protocol.getSupportedTokens({ fromChain: 'solana', toChain: 'arbitrum' })
+
+      expect(tokens).toEqual([{ token: 'USDT0', chain: 'solana', symbol: 'USDT0', decimals: 6, name: 'USDT0', address: MINT }])
     })
 
     test('should resolve chains by key, ignoring case', async () => {
