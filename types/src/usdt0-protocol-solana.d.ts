@@ -35,15 +35,11 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     /**
      * Retrieves the chains supported by the protocol for bridge operations.
      *
-     * Derived from the static config, in the canonical WDK swidge shape.
-     *
      * @returns {Promise<SwidgeSupportedChain[]>} The supported chains.
      */
     getSupportedChains(): Promise<SwidgeSupportedChain[]>;
     /**
      * Retrieves the tokens supported by the protocol for bridge operations.
-     *
-     * Derived from the static config: the tokens with an oft deployment on solana.
      *
      * @param {SwidgeSupportedTokensOptions} [options] - Optional filters for chain- or token-scoped discovery.
      * @returns {Promise<SwidgeSupportedToken[]>} The supported tokens.
