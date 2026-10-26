@@ -189,13 +189,13 @@ describe('Usdt0ProtocolSolana', () => {
       kora = createKora(250_000n)
     })
 
-    test('should bridge through the kora paymaster, which pays the layerzero fee, with the paymaster overrides and without bridgeMaxFee', async () => {
+    test('should bridge through the kora paymaster, which pays the layerzero fee, with the paymaster overrides', async () => {
       const gaslessAccount = new WalletAccountSolanaGasless(SEED_PHRASE, "0'/0'", createGaslessConfig())
       const gaslessProtocol = new Usdt0ProtocolSolana(gaslessAccount, { bridgeMaxFee: 1n })
       spyOnBridgeSteps(gaslessProtocol)
 
       const result = await gaslessProtocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 1_000_000 },
-        { paymasterToken: { address: USDC_MINT }, transactionMaxFee: 250_000n, bridgeMaxFee: 1n })
+        { paymasterToken: { address: USDC_MINT }, transactionMaxFee: 250_000n, bridgeMaxFee: 1_000_000n })
 
       expect(result).toEqual({ hash: 'gasless-signature', fee: 250_000n, bridgeFee: 1_000_000n })
 
@@ -217,7 +217,17 @@ describe('Usdt0ProtocolSolana', () => {
       expect(signatures[sender]).toHaveLength(64)
     })
 
-    test('should leave the fee cap to the transactionMaxFee override', async () => {
+    test('should cap the bridge fee alone with bridgeMaxFee before contacting the paymaster', async () => {
+      const gaslessAccount = new WalletAccountSolanaGasless(SEED_PHRASE, "0'/0'", createGaslessConfig())
+      const gaslessProtocol = new Usdt0ProtocolSolana(gaslessAccount)
+      spyOnBridgeSteps(gaslessProtocol)
+
+      await expect(gaslessProtocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 100 }, { bridgeMaxFee: 999_999n }))
+        .rejects.toThrow('Exceeded maximum fee cost for bridge operation.')
+      expect(kora.getPaymentInstruction).not.toHaveBeenCalled()
+    })
+
+    test('should cap the paymaster fee with the transactionMaxFee override', async () => {
       const gaslessAccount = new WalletAccountSolanaGasless(SEED_PHRASE, "0'/0'", createGaslessConfig())
       const gaslessProtocol = new Usdt0ProtocolSolana(gaslessAccount)
       spyOnBridgeSteps(gaslessProtocol)

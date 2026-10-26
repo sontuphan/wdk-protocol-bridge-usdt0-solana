@@ -45,7 +45,7 @@ Supported destinations are the USDT0 Legacy Mesh chains: Ethereum, Arbitrum, Cel
 
 ### Gasless accounts
 
-Accounts from [`@tetherto/wdk-wallet-solana-gasless`](https://github.com/tetherto/wdk-wallet-solana-gasless) bridge without holding SOL. Their Kora paymaster is the fee payer: it pays the transaction, fronts the LayerZero fee, and charges both back in the paymaster token through the wallet's payment instruction. For these accounts `fee` is that payment, in the paymaster token's base units, and `transactionMaxFee` caps it in place of `bridgeMaxFee`.
+Accounts from [`@tetherto/wdk-wallet-solana-gasless`](https://github.com/tetherto/wdk-wallet-solana-gasless) bridge without holding SOL. Their Kora paymaster is the fee payer: it pays the transaction, fronts the LayerZero fee, and charges both back in the paymaster token through the wallet's payment instruction. For these accounts `fee` is that payment, in the paymaster token's base units, and `transactionMaxFee` caps it; `bridgeMaxFee` caps `bridgeFee` alone, in lamports.
 
 ```javascript
 const { hash, fee, bridgeFee } = await usdt0Bridge.bridge(options, {
