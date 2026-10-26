@@ -80,10 +80,10 @@ describe('Usdt0ProtocolSolana', () => {
       const [tx] = account.sendTransaction.mock.calls[0]
       expect(tx.instructions).toEqual([INSTRUCTION])
 
-      const [route, sendParam, nativeFee, sender] = protocol._buildOftSendInstructions.mock.calls[0]
+      const [nativeFee, sender, , route, sendParam] = protocol._buildOftSendInstructions.mock.calls[0]
       expect(route).toBe(ROUTE)
-      expect(protocol._quoteOftSend).toHaveBeenCalledWith(ROUTE, sendParam, SOLANA_ADDRESS)
-      expect(protocol._buildOftSendInstructions.mock.calls[0][4]).toBe(SOLANA_ADDRESS)
+      expect(protocol._quoteOftSend).toHaveBeenCalledWith(SOLANA_ADDRESS, ROUTE, sendParam)
+      expect(protocol._buildOftSendInstructions.mock.calls[0][2]).toBe(SOLANA_ADDRESS)
       expect(sendParam.dstEid).toBe(30_110)
       expect(sendParam.amountLD).toBe(1_000_000n)
       // The 3 bps store fee is 300, so exactly the rest must arrive.
@@ -168,7 +168,7 @@ describe('Usdt0ProtocolSolana', () => {
     test('should accept the largest u64 amount as a bigint', async () => {
       await protocol.quoteBridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 2n ** 64n - 1n })
 
-      const [, sendParam] = protocol._buildOftSendInstructions.mock.calls[0]
+      const [, , , , sendParam] = protocol._buildOftSendInstructions.mock.calls[0]
       expect(sendParam.amountLD).toBe(2n ** 64n - 1n)
     })
   })
@@ -199,9 +199,9 @@ describe('Usdt0ProtocolSolana', () => {
       expect(result).toEqual({ hash: 'gasless-signature', fee: 250_000n, bridgeFee: 1_000_000n })
 
       const sender = await gaslessAccount.getAddress()
-      const [, sendParam, , builtSender, payer] = gaslessProtocol._buildOftSendInstructions.mock.calls[0]
+      const [, builtSender, payer, , sendParam] = gaslessProtocol._buildOftSendInstructions.mock.calls[0]
       expect([builtSender, payer]).toEqual([sender, PAYMASTER])
-      expect(gaslessProtocol._quoteOftSend).toHaveBeenCalledWith(ROUTE, sendParam, PAYMASTER)
+      expect(gaslessProtocol._quoteOftSend).toHaveBeenCalledWith(PAYMASTER, ROUTE, sendParam)
 
       expect(kora.getPaymentInstruction).toHaveBeenCalledTimes(1)
       expect(kora.getPaymentInstruction.mock.calls[0][0]).toMatchObject({ fee_token: USDC_MINT, source_wallet: sender, signer_key: PAYMASTER })
@@ -241,8 +241,8 @@ describe('Usdt0ProtocolSolana', () => {
 
       await protocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 100 })
 
-      expect(protocol._quoteOftSend.mock.calls[0][2]).toBe(PAYMASTER)
-      expect(protocol._buildOftSendInstructions.mock.calls[0][4]).toBe(PAYMASTER)
+      expect(protocol._quoteOftSend.mock.calls[0][0]).toBe(PAYMASTER)
+      expect(protocol._buildOftSendInstructions.mock.calls[0][2]).toBe(PAYMASTER)
       expect(account.quoteSendTransaction).not.toHaveBeenCalled()
     })
 
@@ -254,7 +254,7 @@ describe('Usdt0ProtocolSolana', () => {
       expect(await gaslessProtocol.quoteBridge({ targetChain: 'ton', recipient: TON_ADDRESS, token: MINT, amount: 100 }, { paymasterToken: { address: USDC_MINT } }))
         .toEqual({ fee: 250_000n, bridgeFee: 1_000_000n })
 
-      const [, , , sender, payer] = gaslessProtocol._buildOftSendInstructions.mock.calls[0]
+      const [, sender, payer] = gaslessProtocol._buildOftSendInstructions.mock.calls[0]
       expect([sender, payer]).toEqual([SOLANA_ADDRESS, PAYMASTER])
 
       const [{ transaction, fee_token: feeToken }] = kora.getPaymentInstruction.mock.calls[0]

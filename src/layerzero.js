@@ -223,12 +223,12 @@ export const dvnConfigDecoder = getStructDecoder([
 /**
  * Parses a Legacy Mesh oft store account.
  *
- * @param {MaybeEncodedAccount} account - The account.
  * @param {Address} programAddress - The oft program expected to own it.
+ * @param {MaybeEncodedAccount} account - The account.
  * @returns {OftStore | null} The oft store, or null if the account is missing or has another owner.
  * @throws {Error} If the account's data has another discriminator or is truncated.
  */
-export function parseOftStore (account, programAddress) {
+export function parseOftStore (programAddress, account) {
   if (!account.exists || account.programAddress !== programAddress) {
     return null
   }
@@ -239,12 +239,12 @@ export function parseOftStore (account, programAddress) {
 /**
  * Parses a Legacy Mesh oft peer config account.
  *
- * @param {MaybeEncodedAccount} account - The account.
  * @param {Address} programAddress - The oft program expected to own it.
+ * @param {MaybeEncodedAccount} account - The account.
  * @returns {PeerConfig | null} The peer config, or null if the account is missing or has another owner.
  * @throws {Error} If the account's data has another discriminator or is truncated.
  */
-export function parsePeerConfig (account, programAddress) {
+export function parsePeerConfig (programAddress, account) {
   if (!account.exists || account.programAddress !== programAddress) {
     return null
   }

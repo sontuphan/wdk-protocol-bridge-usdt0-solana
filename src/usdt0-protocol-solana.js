@@ -315,7 +315,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
     const eid = BLOCKCHAINS[targetChain].eid
 
-    const route = await this._getOftRoute(deployment, eid)
+    const route = await this._getOftRoute(eid, deployment)
 
     const oftFee = amount * BigInt(route.store.feeBps) / 10_000n
 
@@ -334,9 +334,9 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
     const payer = this._getPaymasterAddress() ?? sender
 
-    const { nativeFee: bridgeFee } = await this._quoteOftSend(route, sendParam, payer)
+    const { nativeFee: bridgeFee } = await this._quoteOftSend(payer, route, sendParam)
 
-    const instructions = await this._buildOftSendInstructions(route, sendParam, bridgeFee, sender, payer)
+    const instructions = await this._buildOftSendInstructions(bridgeFee, sender, payer, route, sendParam)
 
     const tx = appendTransactionMessageInstructions(instructions, createTransactionMessage({ version: 0 }))
 
@@ -344,7 +344,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
   }
 
   /** @private */
-  async _quoteOftSend (route, sendParam, payer) {
+  async _quoteOftSend (payer, route, sendParam) {
     if (sendParam.to.length !== 32 || sendParam.oftCmd.length !== 0) {
       throw new Error('Invalid OFT recipient or unsupported OFT command.')
     }
@@ -392,7 +392,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
   }
 
   /** @private */
-  async _getOftRoute (deployment, dstEid) {
+  async _getOftRoute (dstEid, deployment) {
     const programAddress = address(deployment.programId)
 
     const oftStore = address(deployment.oftStore)
@@ -401,13 +401,13 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
     const [storeAccount, peerAccount] = await fetchEncodedAccounts(this._account._rpc, [oftStore, peer], { commitment: this._account._commitment })
 
-    const store = parseOftStore(storeAccount, programAddress)
+    const store = parseOftStore(programAddress, storeAccount)
 
     if (!store || store.tokenMint !== deployment.mint) {
       throw new Error('Invalid OFT store account.')
     }
 
-    const peerConfig = parsePeerConfig(peerAccount, programAddress)
+    const peerConfig = parsePeerConfig(programAddress, peerAccount)
 
     if (!peerConfig) {
       throw new Error(`OFT peer not configured for destination ${dstEid}.`)
@@ -554,7 +554,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
   }
 
   /** @private */
-  async _buildOftSendInstructions (route, sendParam, nativeFee, sender, payer) {
+  async _buildOftSendInstructions (nativeFee, sender, payer, route, sendParam) {
     const { programAddress, oftStore, peer, credits, store, peerConfig, lookupTables } = route
 
     const [[tokenSource], [eventAuthority], remainingAccounts] = await Promise.all([
@@ -597,7 +597,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     const { type } = BLOCKCHAINS[targetChain]
 
     if (type === 'ton') {
-      this._assertValidRecipient(validateTonAddress(recipient), targetChain)
+      this._assertValidRecipient(targetChain, validateTonAddress(recipient))
 
       const address = Address.parse(recipient)
 
@@ -609,7 +609,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     }
 
     if (type === 'tvm') {
-      this._assertValidRecipient(validateTronAddress(recipient), targetChain)
+      this._assertValidRecipient(targetChain, validateTronAddress(recipient))
 
       const bytes = getBase58Encoder().encode(recipient).slice(0, 21)
 
@@ -620,13 +620,13 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       return padLeftEncoder(getBytesEncoder(), 32 - bytes.length).encode(bytes)
     }
 
-    this._assertValidRecipient(validateEVMAddress(recipient), targetChain)
+    this._assertValidRecipient(targetChain, validateEVMAddress(recipient))
 
     return addressToBytes32(recipient)
   }
 
   /** @private */
-  _assertValidRecipient (result, targetChain) {
+  _assertValidRecipient (targetChain, result) {
     if (!result.success) {
       throw new ValueError(`Invalid recipient address for target chain '${targetChain}': ${result.reason}.`)
     }

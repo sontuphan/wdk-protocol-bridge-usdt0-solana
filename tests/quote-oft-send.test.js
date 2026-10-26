@@ -43,7 +43,7 @@ const LOOKUP_TABLE = '6zcTrmdkiQp6dZHYUxVr6A2XVDSYi44X1rcPtvwNcrXi'
 const fixtureAccount = key => parseBase64RpcAccount(key, { ...FIXTURE.accounts[key], data: [FIXTURE.accounts[key].data, 'base64'] })
 const EID_SEED = getU32Encoder({ endian: Endian.Big }).encode(30_110)
 const OFT_STORE_SEED = getAddressEncoder().encode(DEPLOYMENT.oftStore)
-const { endpointProgram: ENDPOINT } = parseOftStore(fixtureAccount(DEPLOYMENT.oftStore), DEPLOYMENT.programId)
+const { endpointProgram: ENDPOINT } = parseOftStore(DEPLOYMENT.programId, fixtureAccount(DEPLOYMENT.oftStore))
 const [[SEND_LIBRARY_CONFIG], [ULN_SETTINGS], [SEND_CONFIG]] = await Promise.all([
   getProgramDerivedAddress({ programAddress: ENDPOINT, seeds: ['SendLibraryConfig', OFT_STORE_SEED, EID_SEED] }),
   getProgramDerivedAddress({ programAddress: LAYERZERO_ULN_PROGRAM, seeds: ['MessageLib'] }),
@@ -68,7 +68,7 @@ describe('_quoteOftSend', () => {
     oftCmd: new Uint8Array()
   })
 
-  const quote = async (params = sendParam()) => protocol._quoteOftSend(await protocol._getOftRoute(DEPLOYMENT, params.dstEid), params, PAYER)
+  const quote = async (params = sendParam()) => protocol._quoteOftSend(PAYER, await protocol._getOftRoute(params.dstEid, DEPLOYMENT), params)
 
   const simulated = () => {
     const [wire] = rpc.simulateTransaction.mock.calls[0]
@@ -252,7 +252,7 @@ describe('_buildOftSendInstructions', () => {
 
   let accounts, protocol
 
-  const build = async (payer = PAYER) => protocol._buildOftSendInstructions(await protocol._getOftRoute(DEPLOYMENT, 30_110), {
+  const build = async (payer = PAYER) => protocol._buildOftSendInstructions(NATIVE_FEE, PAYER, payer, await protocol._getOftRoute(30_110, DEPLOYMENT), {
     dstEid: 30_110,
     to: protocol._encodeRecipient('arbitrum', '0xa460AEbce0d3A4BecAd8ccf9D6D4861296c503Bd'),
     amountLD: 1_000_000n,
@@ -260,7 +260,7 @@ describe('_buildOftSendInstructions', () => {
     extraOptions: Options.newOptions().toBytes(),
     composeMsg: new Uint8Array(),
     oftCmd: new Uint8Array()
-  }, NATIVE_FEE, PAYER, payer)
+  })
 
   beforeEach(() => {
     accounts = { ...FIXTURE.accounts }
@@ -280,7 +280,7 @@ describe('_buildOftSendInstructions', () => {
 
     const [credits] = await getProgramDerivedAddress({ programAddress: DEPLOYMENT.programId, seeds: ['Credits'] })
     const [eventAuthority] = await getProgramDerivedAddress({ programAddress: DEPLOYMENT.programId, seeds: ['__event_authority'] })
-    const { tokenEscrow } = parseOftStore(parseBase64RpcAccount(DEPLOYMENT.oftStore, { ...accounts[DEPLOYMENT.oftStore], data: [accounts[DEPLOYMENT.oftStore].data, 'base64'] }), DEPLOYMENT.programId)
+    const { tokenEscrow } = parseOftStore(DEPLOYMENT.programId, parseBase64RpcAccount(DEPLOYMENT.oftStore, { ...accounts[DEPLOYMENT.oftStore], data: [accounts[DEPLOYMENT.oftStore].data, 'base64'] }))
     expect(send.programAddress).toBe(DEPLOYMENT.programId)
     expect(send.accounts.map(account => [account.address, account.role])).toEqual([
       [PAYER, AccountRole.READONLY_SIGNER],
@@ -344,7 +344,7 @@ describe('Legacy Mesh account parsers', () => {
   const account = (key, data = FIXTURE.accounts[key].data) => parseBase64RpcAccount(key, { ...FIXTURE.accounts[key], data: [data, 'base64'] })
 
   test('parses the mainnet oft store', () => {
-    expect(parseOftStore(account(DEPLOYMENT.oftStore), DEPLOYMENT.programId)).toMatchObject({
+    expect(parseOftStore(DEPLOYMENT.programId, account(DEPLOYMENT.oftStore))).toMatchObject({
       tokenMint: DEPLOYMENT.mint,
       endpointProgram: '76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6',
       feeBps: expect.any(Number),
@@ -353,22 +353,22 @@ describe('Legacy Mesh account parsers', () => {
   })
 
   test('parses the mainnet arbitrum peer config', () => {
-    const peer = parsePeerConfig(account(ARBITRUM_PEER), DEPLOYMENT.programId)
+    const peer = parsePeerConfig(DEPLOYMENT.programId, account(ARBITRUM_PEER))
     expect(Buffer.from(peer.peerAddress).toString('hex')).toBe('00000000000000000000000077652d5aba086137b595875263fc200182919b92')
     expect(peer.enforcedOptions.sendOft.length).toBeGreaterThan(0)
   })
 
   test('returns null for missing or foreign accounts', () => {
     const store = account(DEPLOYMENT.oftStore)
-    expect(parseOftStore(parseBase64RpcAccount(DEPLOYMENT.oftStore, null), DEPLOYMENT.programId)).toBeNull()
-    expect(parseOftStore({ ...store, programAddress: PAYER }, DEPLOYMENT.programId)).toBeNull()
-    expect(parsePeerConfig(parseBase64RpcAccount(ARBITRUM_PEER, null), DEPLOYMENT.programId)).toBeNull()
+    expect(parseOftStore(DEPLOYMENT.programId, parseBase64RpcAccount(DEPLOYMENT.oftStore, null))).toBeNull()
+    expect(parseOftStore(DEPLOYMENT.programId, { ...store, programAddress: PAYER })).toBeNull()
+    expect(parsePeerConfig(DEPLOYMENT.programId, parseBase64RpcAccount(ARBITRUM_PEER, null))).toBeNull()
   })
 
   test('throws for mismatched or truncated accounts', () => {
     const truncated = Buffer.from(FIXTURE.accounts[DEPLOYMENT.oftStore].data, 'base64').subarray(0, 100).toString('base64')
-    expect(() => parseOftStore(account(ARBITRUM_PEER), DEPLOYMENT.programId)).toThrow(`Failed to decode account data at address: ${ARBITRUM_PEER}`)
-    expect(() => parseOftStore(account(DEPLOYMENT.oftStore, truncated), DEPLOYMENT.programId)).toThrow(`Failed to decode account data at address: ${DEPLOYMENT.oftStore}`)
-    expect(() => parsePeerConfig(account(DEPLOYMENT.oftStore), DEPLOYMENT.programId)).toThrow(`Failed to decode account data at address: ${DEPLOYMENT.oftStore}`)
+    expect(() => parseOftStore(DEPLOYMENT.programId, account(ARBITRUM_PEER))).toThrow(`Failed to decode account data at address: ${ARBITRUM_PEER}`)
+    expect(() => parseOftStore(DEPLOYMENT.programId, account(DEPLOYMENT.oftStore, truncated))).toThrow(`Failed to decode account data at address: ${DEPLOYMENT.oftStore}`)
+    expect(() => parsePeerConfig(DEPLOYMENT.programId, account(DEPLOYMENT.oftStore))).toThrow(`Failed to decode account data at address: ${DEPLOYMENT.oftStore}`)
   })
 })
