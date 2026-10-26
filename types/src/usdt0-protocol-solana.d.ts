@@ -56,7 +56,11 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     /** @private */
     private _getOftRoute;
     /** @private */
-    private _getEndpointAccounts;
+    private _getEndpointRoute;
+    /** @private */
+    private _getQuoteEndpointAccounts;
+    /** @private */
+    private _getSendEndpointAccounts;
     /** @private */
     private _buildOftSendInstructions;
     /** @private */

@@ -117,6 +117,37 @@ const U64_MAX = 0xffffffffffffffffn
  * @property {import('./layerzero.js').OftStore} store - The parsed oft store.
  * @property {import('./layerzero.js').PeerConfig} peerConfig - The parsed peer config.
  * @property {Record<SolanaAddress, SolanaAddress[]>} lookupTables - The store's address lookup table, by address.
+ * @property {EndpointRoute} endpoint - The layerzero accounts a quote or a send to the destination reads.
+ */
+
+/**
+ * A worker a send pays, with its price feed.
+ *
+ * @typedef {Object} EndpointWorker
+ * @property {SolanaAddress} program - The worker's program.
+ * @property {SolanaAddress} config - The worker's config.
+ * @property {SolanaAddress} priceFeedProgram - The price feed's program.
+ * @property {SolanaAddress} priceFeed - The price feed's config.
+ */
+
+/**
+ * The layerzero endpoint and ULN accounts a quote or a send to a destination reads.
+ *
+ * @typedef {Object} EndpointRoute
+ * @property {SolanaAddress} endpoint - The endpoint program.
+ * @property {SolanaAddress} sender - The oapp sending the message.
+ * @property {SolanaAddress} uln - The ULN message library.
+ * @property {SolanaAddress} sendLibraryConfig - The oapp's send library config.
+ * @property {SolanaAddress} defaultSendLibraryConfig - The default send library config.
+ * @property {SolanaAddress} sendLibraryInfo - The ULN's message library info.
+ * @property {SolanaAddress} endpointSettings - The endpoint settings.
+ * @property {SolanaAddress} nonce - The oapp's nonce for the destination.
+ * @property {SolanaAddress} endpointEventAuthority - The endpoint's event authority.
+ * @property {SolanaAddress} sendConfig - The oapp's ULN send config.
+ * @property {SolanaAddress} defaultSendConfig - The default ULN send config.
+ * @property {SolanaAddress} ulnEventAuthority - The ULN's event authority.
+ * @property {SolanaAddress | null} treasury - The ULN's treasury, if one is set.
+ * @property {EndpointWorker[]} workers - The executor, then the dvns.
  */
 
 export default class Usdt0ProtocolSolana extends BridgeProtocol {
@@ -350,9 +381,9 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
   /** @private */
   async _quoteOftSend (payer, route, sendParam) {
-    const { programAddress, oftStore, peer, credits, store, peerConfig, lookupTables } = route
+    const { programAddress, oftStore, peer, credits, lookupTables, endpoint } = route
 
-    const remainingAccounts = await this._getEndpointAccounts(store.endpointProgram, oftStore, sendParam.dstEid, peerConfig.peerAddress)
+    const remainingAccounts = this._getQuoteEndpointAccounts(endpoint)
 
     const instruction = {
       programAddress,
@@ -427,11 +458,13 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       lookupTables[store.alt] = decodeAccount(table, getAddressLookupTableDecoder()).data.addresses
     }
 
-    return { programAddress, oftStore, peer, credits, store, peerConfig, lookupTables }
+    const endpoint = await this._getEndpointRoute(store.endpointProgram, oftStore, dstEid, peerConfig.peerAddress)
+
+    return { programAddress, oftStore, peer, credits, store, peerConfig, lookupTables, endpoint }
   }
 
   /** @private */
-  async _getEndpointAccounts (endpoint, sender, dstEid, receiver, payer) {
+  async _getEndpointRoute (endpoint, sender, dstEid, receiver) {
     const eid = getU32Encoder({ endian: Endian.Big }).encode(dstEid)
 
     const senderSeed = getAddressEncoder().encode(sender)
@@ -501,68 +534,98 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       getProgramDerivedAddress({ programAddress: LAYERZERO_ULN_PROGRAM, seeds: ['__event_authority'] })
     ])
 
-    /** @type {Array<[SolanaAddress, AccountRole?]>} */
-    const workerAccounts = workers.flatMap((worker, i) => {
+    const workerRoutes = workers.map((worker, i) => {
       const priceFeed = priceFeedAccounts[i]
 
       if (!priceFeed.exists) {
         throw new Error(`LayerZero price feed ${priceFeed.address} not initialized.`)
       }
 
-      return [[workerConfigs[i].program], [worker, payer ? AccountRole.WRITABLE : AccountRole.READONLY], [priceFeed.programAddress], [priceFeed.address]]
+      return { program: workerConfigs[i].program, config: worker, priceFeedProgram: priceFeed.programAddress, priceFeed: priceFeed.address }
     })
 
-    const treasury = payer && decodeAccount(ulnAccount, ulnSettingsDecoder).data.treasury?.nativeReceiver
+    const treasury = decodeAccount(ulnAccount, ulnSettingsDecoder).data.treasury?.nativeReceiver ?? null
+
+    return {
+      endpoint,
+      sender,
+      uln,
+      sendLibraryConfig,
+      defaultSendLibraryConfig,
+      sendLibraryInfo,
+      endpointSettings,
+      nonce,
+      endpointEventAuthority,
+      sendConfig,
+      defaultSendConfig,
+      ulnEventAuthority,
+      treasury,
+      workers: workerRoutes
+    }
+  }
+
+  /** @private */
+  _getQuoteEndpointAccounts (endpointRoute) {
+    const { endpoint, uln, sendLibraryConfig, defaultSendLibraryConfig, sendLibraryInfo, endpointSettings, nonce, sendConfig, defaultSendConfig, workers } = endpointRoute
 
     /** @type {Array<[SolanaAddress, AccountRole?]>} */
-    const accounts = payer
-      ? [
-          [endpoint],
-          [sender],
-          [LAYERZERO_ULN_PROGRAM],
-          [sendLibraryConfig],
-          [defaultSendLibraryConfig],
-          [sendLibraryInfo],
-          [endpointSettings],
-          [nonce, AccountRole.WRITABLE],
-          [endpointEventAuthority],
-          [endpoint],
-          [uln],
-          [sendConfig],
-          [defaultSendConfig],
-          [payer, AccountRole.WRITABLE_SIGNER],
-          treasury ? [treasury, AccountRole.WRITABLE] : [LAYERZERO_ULN_PROGRAM],
-          [SYSTEM_PROGRAM_ADDRESS],
-          [ulnEventAuthority],
-          [LAYERZERO_ULN_PROGRAM],
-          ...workerAccounts
-        ]
-      : [
-          [endpoint],
-          [LAYERZERO_ULN_PROGRAM],
-          [sendLibraryConfig],
-          [defaultSendLibraryConfig],
-          [sendLibraryInfo],
-          [endpointSettings],
-          [nonce],
-          [uln],
-          [sendConfig],
-          [defaultSendConfig],
-          ...workerAccounts
-        ]
+    const accounts = [
+      [endpoint],
+      [LAYERZERO_ULN_PROGRAM],
+      [sendLibraryConfig],
+      [defaultSendLibraryConfig],
+      [sendLibraryInfo],
+      [endpointSettings],
+      [nonce],
+      [uln],
+      [sendConfig],
+      [defaultSendConfig],
+      ...workers.flatMap(({ program, config, priceFeedProgram, priceFeed }) => [[program], [config], [priceFeedProgram], [priceFeed]])
+    ]
+
+    return accounts.map(([account, role = AccountRole.READONLY]) => ({ address: account, role }))
+  }
+
+  /** @private */
+  _getSendEndpointAccounts (payer, endpointRoute) {
+    const { endpoint, sender, uln, sendLibraryConfig, defaultSendLibraryConfig, sendLibraryInfo, endpointSettings, nonce, endpointEventAuthority, sendConfig, defaultSendConfig, ulnEventAuthority, treasury, workers } = endpointRoute
+
+    /** @type {Array<[SolanaAddress, AccountRole?]>} */
+    const accounts = [
+      [endpoint],
+      [sender],
+      [LAYERZERO_ULN_PROGRAM],
+      [sendLibraryConfig],
+      [defaultSendLibraryConfig],
+      [sendLibraryInfo],
+      [endpointSettings],
+      [nonce, AccountRole.WRITABLE],
+      [endpointEventAuthority],
+      [endpoint],
+      [uln],
+      [sendConfig],
+      [defaultSendConfig],
+      [payer, AccountRole.WRITABLE_SIGNER],
+      treasury ? [treasury, AccountRole.WRITABLE] : [LAYERZERO_ULN_PROGRAM],
+      [SYSTEM_PROGRAM_ADDRESS],
+      [ulnEventAuthority],
+      [LAYERZERO_ULN_PROGRAM],
+      ...workers.flatMap(({ program, config, priceFeedProgram, priceFeed }) => [[program], [config, AccountRole.WRITABLE], [priceFeedProgram], [priceFeed]])
+    ]
 
     return accounts.map(([account, role = AccountRole.READONLY]) => ({ address: account, role }))
   }
 
   /** @private */
   async _buildOftSendInstructions (nativeFee, sender, payer, route, sendParam) {
-    const { programAddress, oftStore, peer, credits, store, peerConfig, lookupTables } = route
+    const { programAddress, oftStore, peer, credits, store, lookupTables, endpoint } = route
 
-    const [[tokenSource], [eventAuthority], remainingAccounts] = await Promise.all([
+    const [[tokenSource], [eventAuthority]] = await Promise.all([
       findAssociatedTokenPda({ mint: store.tokenMint, owner: sender, tokenProgram: TOKEN_PROGRAM_ADDRESS }),
-      getProgramDerivedAddress({ programAddress, seeds: ['__event_authority'] }),
-      this._getEndpointAccounts(store.endpointProgram, oftStore, sendParam.dstEid, peerConfig.peerAddress, payer)
+      getProgramDerivedAddress({ programAddress, seeds: ['__event_authority'] })
     ])
+
+    const remainingAccounts = this._getSendEndpointAccounts(payer, endpoint)
 
     /** @type {Array<[SolanaAddress, AccountRole?]>} */
     const accounts = [
