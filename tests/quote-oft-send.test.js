@@ -347,7 +347,7 @@ describe('Legacy Mesh account parsers', () => {
     expect(parseOftStore(DEPLOYMENT.programId, account(DEPLOYMENT.oftStore))).toMatchObject({
       tokenMint: DEPLOYMENT.mint,
       endpointProgram: '76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6',
-      feeBps: expect.any(Number),
+      feeBps: 3,
       alt: LOOKUP_TABLE
     })
   })
