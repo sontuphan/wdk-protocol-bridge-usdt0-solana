@@ -15,11 +15,11 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
      * Quotes the costs of a bridge operation.
      *
      * @param {BridgeOptions} options - The bridge's options. Optionally pass 'dstEid' to override the destination endpoint id.
-     * @param {SolanaGaslessWalletPaymasterConfigOverrides} [config] - If the protocol has been initialized with a gasless wallet account,
-     *   it can be used to override its paymaster options.
+     * @param {Pick<SolanaGaslessWalletPaymasterConfigOverrides, 'paymasterToken'>} [config] - If the protocol has been
+     *   initialized with a gasless wallet account, it can be used to override its paymaster token.
      * @returns {Promise<Omit<BridgeResult, 'hash'>>} The bridge's quotes.
      */
-    quoteBridge(options: BridgeOptions, config?: SolanaGaslessWalletPaymasterConfigOverrides): Promise<Omit<BridgeResult, "hash">>;
+    quoteBridge(options: BridgeOptions, config?: Pick<SolanaGaslessWalletPaymasterConfigOverrides, "paymasterToken">): Promise<Omit<BridgeResult, "hash">>;
     /**
      * Retrieves the chains supported by the protocol for bridge operations.
      *
@@ -61,9 +61,6 @@ export type SwidgeSupportedToken = import("@tetherto/wdk-wallet/protocols").Swid
 export type SwidgeSupportedTokensOptions = import("@tetherto/wdk-wallet/protocols").SwidgeSupportedTokensOptions;
 /**
  * The paymaster options a gasless wallet account accepts as overrides.
- *
- * Mirrors `SolanaGaslessWalletPaymasterConfigOverrides` from `@tetherto/wdk-wallet-solana-gasless`; declared locally so the
- * gasless wallet is not a runtime dependency.
  */
 export type SolanaGaslessWalletPaymasterConfigOverrides = {
     /**
@@ -72,10 +69,6 @@ export type SolanaGaslessWalletPaymasterConfigOverrides = {
     paymasterToken?: {
         address: string;
     };
-    /**
-     * - The maximum fee amount for transfer operations.
-     */
-    transferMaxFee?: number | bigint;
     /**
      * - The maximum fee amount for sendTransaction and signTransaction operations.
      */
