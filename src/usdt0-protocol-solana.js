@@ -254,7 +254,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
         name: tokenConfig.name
       }
 
-      if (chainKey === SOURCE_CHAIN && deployment.mint) {
+      if (chainKey === SOURCE_CHAIN) {
         token.address = deployment.mint
       }
 
