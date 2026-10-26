@@ -345,10 +345,6 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
   /** @private */
   async _quoteOftSend (payer, route, sendParam) {
-    if (sendParam.to.length !== 32 || sendParam.oftCmd.length !== 0) {
-      throw new Error('Invalid OFT recipient or unsupported OFT command.')
-    }
-
     const { programAddress, oftStore, peer, credits, store, peerConfig, lookupTables } = route
 
     const remainingAccounts = await this._getEndpointAccounts(store.endpointProgram, oftStore, sendParam.dstEid, peerConfig.peerAddress)

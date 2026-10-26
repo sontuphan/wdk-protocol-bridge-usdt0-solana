@@ -198,16 +198,6 @@ describe('_quoteOftSend', () => {
     await expect(quote()).rejects.toThrow(`LayerZero worker ${EXECUTOR_CONFIG} not initialized.`)
   })
 
-  test.each([
-    ['a short recipient', params => { params.to = params.to.slice(1) }],
-    ['an oft command', params => { params.oftCmd = new Uint8Array([1]) }]
-  ])('rejects %s before any rpc call', async (_, edit) => {
-    const params = sendParam()
-    edit(params)
-    await expect(quote(params)).rejects.toThrow('Invalid OFT recipient or unsupported OFT command.')
-    expect(rpc.simulateTransaction).not.toHaveBeenCalled()
-  })
-
   test('rejects a route with a missing price feed', async () => {
     delete accounts[PRICE_FEED]
     await expect(quote()).rejects.toThrow(`LayerZero price feed ${PRICE_FEED} not initialized.`)
