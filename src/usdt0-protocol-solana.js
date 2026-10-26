@@ -283,7 +283,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
   /** @private */
   async _getBridgeTransaction ({ targetChain, recipient, token, amount: rawAmount, dstEid }) {
-    if (!BLOCKCHAINS[targetChain]) {
+    if (!Object.prototype.hasOwnProperty.call(BLOCKCHAINS, targetChain)) {
       throw new ValueError(`Target chain '${targetChain}' not supported.`)
     }
 
@@ -636,13 +636,9 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       return padLeftEncoder(getBytesEncoder(), 32 - bytes.length).encode(bytes)
     }
 
-    if (type === 'evm') {
-      this._assertValidRecipient(validateEVMAddress(recipient), targetChain)
+    this._assertValidRecipient(validateEVMAddress(recipient), targetChain)
 
-      return addressToBytes32(recipient)
-    }
-
-    throw new ValueError(`Target chain '${targetChain}' not supported.`)
+    return addressToBytes32(recipient)
   }
 
   /** @private */

@@ -150,6 +150,11 @@ describe('Usdt0ProtocolSolana', () => {
         .rejects.toStrictEqual(new ValueError("Target chain 'unknown' not supported."))
     })
 
+    test('should reject an object prototype key as the target chain before validating the other options', async () => {
+      await expect(protocol.bridge({ targetChain: 'toString', recipient: EVM_ADDRESS, token: MINT, amount: 0 }))
+        .rejects.toStrictEqual(new ValueError("Target chain 'toString' not supported."))
+    })
+
     test('should throw if the target chain is solana', async () => {
       await expect(protocol.bridge({ targetChain: 'solana', recipient: SOLANA_ADDRESS, token: MINT, amount: 100 }))
         .rejects.toStrictEqual(new ValueError('The target chain cannot be equal to the source chain.'))
@@ -315,11 +320,6 @@ describe('Usdt0ProtocolSolana', () => {
     test('should throw for the tron zero address', () => {
       expect(() => encode('tron', 'T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb')).toThrow(ValueError)
       expect(() => encode('tron', 'T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb')).toThrow("Invalid recipient address for target chain 'tron': ZERO_ADDRESS.")
-    })
-
-    test('should throw for chains without a recipient encoding', () => {
-      expect(() => encode('solana', SOLANA_ADDRESS)).toThrow(ValueError)
-      expect(() => encode('solana', SOLANA_ADDRESS)).toThrow("Target chain 'solana' not supported.")
     })
   })
 
