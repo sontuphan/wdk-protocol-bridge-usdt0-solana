@@ -72,7 +72,7 @@ The Kora node must allow the paymaster to front the LayerZero fee: margin pricin
 | `getSupportedChains()` | Lists the supported chains. |
 | `getSupportedTokens(options?)` | Lists the supported tokens, optionally scoped by `fromChain`, `toChain` or `fromToken`. |
 
-`options` is `{ targetChain, recipient, token, amount, dstEid? }`, where `token` is the SPL mint address and `dstEid` overrides the LayerZero endpoint id of the target chain. `config` overrides a gasless account's paymaster options (`paymasterToken`, `transactionMaxFee`); for `bridge` it can also override `bridgeMaxFee`.
+`options` is `{ targetChain, recipient, token, amount }`, where `token` is the SPL mint address. `config` overrides a gasless account's paymaster options (`paymasterToken`, `transactionMaxFee`); for `bridge` it can also override `bridgeMaxFee`.
 
 ## 🛠️ Development
 

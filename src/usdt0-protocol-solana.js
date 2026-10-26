@@ -93,7 +93,6 @@ const U64_MAX = 0xffffffffffffffffn
  * @property {string} recipient - The address of the recipient.
  * @property {string} token - The spl mint address of the token to bridge.
  * @property {number | bigint} amount - The amount of tokens to bridge to the destination chain (in base unit).
- * @property {number} [dstEid] - Custom LayerZero destination endpoint ID to override the default for the target chain.
  */
 
 /**
@@ -127,8 +126,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
    * Gasless accounts pay through their paymaster, which also fronts the layerzero fee and charges it back in the
    * paymaster token.
    *
-   * @param {BridgeOptions} options - The bridge's options. Optionally pass 'dstEid' to override the destination
-   *   endpoint id.
+   * @param {BridgeOptions} options - The bridge's options.
    * @param {PaymasterConfigOverrides & Pick<BridgeProtocolConfig, 'bridgeMaxFee'>} [config] - If the protocol has
    *   been initialized with a gasless wallet account, it can be used to override its paymaster options;
    *   'bridgeMaxFee' overrides the protocol's. 'bridgeMaxFee' caps 'fee' plus 'bridgeFee', in lamports; for a
@@ -178,8 +176,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
   /**
    * Quotes the costs of a bridge operation.
    *
-   * @param {BridgeOptions} options - The bridge's options. Optionally pass 'dstEid' to override the destination
-   *   endpoint id.
+   * @param {BridgeOptions} options - The bridge's options.
    * @param {Pick<PaymasterConfigOverrides, 'paymasterToken'>} [config] - If the protocol has been
    *   initialized with a gasless wallet account, it can be used to override its paymaster token.
    * @returns {Promise<Omit<BridgeResult, 'hash'>>} The bridge's quotes.
@@ -282,7 +279,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
   }
 
   /** @private */
-  async _getBridgeTransaction ({ targetChain, recipient, token, amount: rawAmount, dstEid }) {
+  async _getBridgeTransaction ({ targetChain, recipient, token, amount: rawAmount }) {
     if (!Object.prototype.hasOwnProperty.call(BLOCKCHAINS, targetChain)) {
       throw new ValueError(`Target chain '${targetChain}' not supported.`)
     }
@@ -309,7 +306,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
       throw new ValueError(`Invalid recipient address for target chain '${targetChain}': ZERO_ADDRESS.`)
     }
 
-    const eid = dstEid ?? BLOCKCHAINS[targetChain].eid
+    const eid = BLOCKCHAINS[targetChain].eid
 
     const route = await this._getOftRoute(deployment, eid)
 

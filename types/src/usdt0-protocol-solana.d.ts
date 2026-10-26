@@ -5,8 +5,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
      * Gasless accounts pay through their paymaster, which also fronts the layerzero fee and charges it back in the
      * paymaster token.
      *
-     * @param {BridgeOptions} options - The bridge's options. Optionally pass 'dstEid' to override the destination
-     *   endpoint id.
+     * @param {BridgeOptions} options - The bridge's options.
      * @param {PaymasterConfigOverrides & Pick<BridgeProtocolConfig, 'bridgeMaxFee'>} [config] - If the protocol has
      *   been initialized with a gasless wallet account, it can be used to override its paymaster options;
      *   'bridgeMaxFee' overrides the protocol's. 'bridgeMaxFee' caps 'fee' plus 'bridgeFee', in lamports; for a
@@ -23,8 +22,7 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
     /**
      * Quotes the costs of a bridge operation.
      *
-     * @param {BridgeOptions} options - The bridge's options. Optionally pass 'dstEid' to override the destination
-     *   endpoint id.
+     * @param {BridgeOptions} options - The bridge's options.
      * @param {Pick<PaymasterConfigOverrides, 'paymasterToken'>} [config] - If the protocol has been
      *   initialized with a gasless wallet account, it can be used to override its paymaster token.
      * @returns {Promise<Omit<BridgeResult, 'hash'>>} The bridge's quotes.
@@ -100,9 +98,5 @@ export type BridgeOptions = {
      * - The amount of tokens to bridge to the destination chain (in base unit).
      */
     amount: number | bigint;
-    /**
-     * - Custom LayerZero destination endpoint ID to override the default for the target chain.
-     */
-    dstEid?: number;
 };
 import { BridgeProtocol } from '@tetherto/wdk-wallet/protocols';

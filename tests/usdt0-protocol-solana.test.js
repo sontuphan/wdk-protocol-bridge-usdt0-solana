@@ -92,13 +92,6 @@ describe('Usdt0ProtocolSolana', () => {
       expect(sender).toBe(SOLANA_ADDRESS)
     })
 
-    test('should use the custom dstEid when provided', async () => {
-      await protocol.bridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 100, dstEid: 40_231 })
-
-      const [, sendParam] = protocol._buildOftSendInstructions.mock.calls[0]
-      expect(sendParam.dstEid).toBe(40_231)
-    })
-
     test('should throw if the bridge cost exceeds the bridge max fee', async () => {
       protocol = new Usdt0ProtocolSolana(account, { bridgeMaxFee: 1_000_000n })
       jest.spyOn(protocol, '_getOftRoute').mockResolvedValue(ROUTE)
