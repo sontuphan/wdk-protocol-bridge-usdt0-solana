@@ -14,6 +14,8 @@
 
 'use strict'
 
+import { UnsupportedOperationError, ValueError } from '@tetherto/wdk-wallet/protocols'
+
 import { decodeAccount } from '@solana/accounts'
 import { getAddressDecoder, getProgramDerivedAddress } from '@solana/addresses'
 import {
@@ -95,6 +97,26 @@ const ULN_SEND_CONFIG_DISCRIMINATOR = '5bdd878983c7ae19'
 const EXECUTOR_CONFIG_DISCRIMINATOR = '8611e2180aad9d4e'
 
 const DVN_CONFIG_DISCRIMINATOR = '31512162eaa85d49'
+
+/**
+ * The Legacy Mesh oft program's errors, by error number: the error class to throw and its message.
+ *
+ * @type {Record<number, { ErrorClass: typeof Error, message: string }>}
+ */
+export const OFT_ERRORS = {
+  6000: { ErrorClass: Error, message: 'The signer is not authorized to perform this operation.' },
+  6001: { ErrorClass: Error, message: 'The message was not sent by the configured peer.' },
+  6002: { ErrorClass: Error, message: 'The token mint has unsupported decimals.' },
+  6003: { ErrorClass: ValueError, message: 'The amount after fees is below the minimum amount to receive.' },
+  6004: { ErrorClass: Error, message: 'The recipient token account is not valid.' },
+  6005: { ErrorClass: Error, message: 'The fee balance is too low for the withdrawal.' },
+  6006: { ErrorClass: ValueError, message: 'The amount is too small to bridge.' },
+  6007: { ErrorClass: ValueError, message: 'The amount after fees exceeds the remaining capacity of the route to the target chain.' },
+  6008: { ErrorClass: ValueError, message: 'The target chain is not supported by the oft program.' },
+  6009: { ErrorClass: Error, message: 'The layerzero message is not valid.' },
+  6010: { ErrorClass: Error, message: 'The fee basis points are not valid.' },
+  6011: { ErrorClass: UnsupportedOperationError, message: 'Compose messages are not supported for ton.' }
+}
 
 const addressesDecoder = getArrayDecoder(getAddressDecoder())
 

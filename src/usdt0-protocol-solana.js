@@ -58,6 +58,7 @@ import {
   parseOftStore,
   parsePeerConfig,
   messagingFeeDecoder,
+  OFT_ERRORS,
   quoteSendEncoder,
   sendEncoder,
   sendLibraryConfigDecoder,
@@ -166,7 +167,8 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
    * @returns {Promise<BridgeResult>} The bridge's result.
    * @throws {AccountRequiredError} If the protocol has been initialized with a read-only account.
    * @throws {ProviderRequiredError} If the wallet is not connected to a provider.
-   * @throws {ValueError} If the target chain, token, amount or recipient is not valid.
+   * @throws {ValueError} If the target chain, token, amount or recipient is not valid, or the oft program rejects the
+   *   amount or the target chain.
    * @throws {MaximumFeeExceededError} If the bridge's costs exceed 'bridgeMaxFee', or a gasless account's
    *   paymaster fee exceeds 'transactionMaxFee'.
    */
@@ -212,7 +214,8 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
    *   initialized with a gasless wallet account, it can be used to override its paymaster token.
    * @returns {Promise<Omit<BridgeResult, 'hash'>>} The bridge's quotes.
    * @throws {ProviderRequiredError} If the wallet is not connected to a provider.
-   * @throws {ValueError} If the target chain, token, amount or recipient is not valid.
+   * @throws {ValueError} If the target chain, token, amount or recipient is not valid, or the oft program rejects the
+   *   amount or the target chain.
    */
   async quoteBridge (options, config) {
     if (!this._account._rpc) {
@@ -405,6 +408,13 @@ export default class Usdt0ProtocolSolana extends BridgeProtocol {
 
     if (value.err === 'AccountNotFound') {
       throw new Error('Cannot quote from an unfunded account: fund it with SOL first.')
+    }
+
+    const oftError = OFT_ERRORS[Number(value.err?.InstructionError?.[1]?.Custom)]
+
+    if (oftError) {
+      const { ErrorClass, message } = oftError
+      throw new ErrorClass(message)
     }
 
     if (value.err) {

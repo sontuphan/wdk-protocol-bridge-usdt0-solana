@@ -9,7 +9,7 @@ import { Address } from '@ton/core'
 
 import Usdt0ProtocolSolana from '../index.js'
 
-import { DEPLOYMENT, NATIVE_FEE, NETWORK_FEE, SIGNATURE, createRpc, decodeMessage, decodeOftSend, decodeTransaction, simulatedFeePayer } from './fixture-rpc.js'
+import { DEPLOYMENT, NATIVE_FEE, NETWORK_FEE, SIGNATURE, createProgramRpc, createRpc, decodeMessage, decodeOftSend, decodeTransaction, simulatedFeePayer } from './fixture-rpc.js'
 
 const SEED_PHRASE = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
 
@@ -149,6 +149,20 @@ describe('Usdt0ProtocolSolana with a solana wallet account', () => {
       await protocol.quoteBridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 2n ** 64n - 1n })
 
       expect(decodeOftSend(decodeMessage(rpc.getFeeForMessage.mock.calls[0][0]).oftData).amountLD).toBe(2n ** 64n - 1n)
+    })
+
+    test('should throw if the amount after fees exceeds the remaining credits of the route', async () => {
+      protocol = new Usdt0ProtocolSolana(new WalletAccountReadOnlySolana(sender, { provider: createProgramRpc(sender, 1_999_399n) }))
+
+      await expect(protocol.quoteBridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 2_000_000 }))
+        .rejects.toStrictEqual(new ValueError('The amount after fees exceeds the remaining capacity of the route to the target chain.'))
+    })
+
+    test('should pass the credits check if the remaining credits of the route cover the amount after fees', async () => {
+      protocol = new Usdt0ProtocolSolana(new WalletAccountReadOnlySolana(sender, { provider: createProgramRpc(sender, 1_999_400n) }))
+
+      await expect(protocol.quoteBridge({ targetChain: 'arbitrum', recipient: EVM_ADDRESS, token: MINT, amount: 2_000_000 }))
+        .rejects.toThrow('failed: Unsupported program id')
     })
 
     test('should throw if the account is not connected to a provider', async () => {

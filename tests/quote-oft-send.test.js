@@ -214,9 +214,14 @@ describe('_quoteOftSend', () => {
   })
 
   test('reports simulation errors and logs, including bigint RPC error codes', async () => {
-    result.err = { InstructionError: [1n, { Custom: 6001n }] }
-    result.logs = ['Program log: InsufficientCredits']
-    await expect(quote()).rejects.toThrow('OFT quote simulation failed: {"InstructionError":["1",{"Custom":"6001"}]}. Program log: InsufficientCredits')
+    result.err = { InstructionError: [1n, { Custom: 3012n }] }
+    result.logs = ['Program log: AccountNotInitialized']
+    await expect(quote()).rejects.toThrow('OFT quote simulation failed: {"InstructionError":["1",{"Custom":"3012"}]}. Program log: AccountNotInitialized')
+  })
+
+  test('reports an oft program error a caller cannot fix as a plain error', async () => {
+    result.err = { InstructionError: [1n, { Custom: 6000n }] }
+    await expect(quote()).rejects.toStrictEqual(new Error('The signer is not authorized to perform this operation.'))
   })
 
   test('reports an unfunded payer clearly', async () => {

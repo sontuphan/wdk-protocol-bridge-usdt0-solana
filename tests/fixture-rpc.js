@@ -15,6 +15,7 @@
 import { readFileSync } from 'node:fs'
 
 import { jest } from '@jest/globals'
+import { LiteSVM } from 'litesvm'
 
 import {
   addDecoderSizePrefix,
@@ -34,6 +35,14 @@ import { SOLANA_OFT_DEPLOYMENTS } from '../src/config.js'
 export const FIXTURE = JSON.parse(readFileSync(new URL('./fixtures/mainnet-arbitrum-route.json', import.meta.url), 'utf8'))
 
 export const DEPLOYMENT = SOLANA_OFT_DEPLOYMENTS.USDT0
+
+// The Legacy Mesh oft program, dumped from mainnet program data account G22eFmghsEiDG6L5UrKH4F4HLUN3RBaQpb5imm6osXft at slot
+// 463112104, and the slot after the lookup table's last extension, from which its addresses resolve.
+const OFT_PROGRAM = readFileSync(new URL('./fixtures/mainnet-oft-program.so', import.meta.url))
+
+const LOOKUP_TABLE_ACTIVE_SLOT = 372_346_713n
+
+const CREDITS = '6trV82jqtcqrsMd5ZXKvR6QzLX6bHstBK4wZFx1qrffC'
 
 export const NATIVE_FEE = 1_000_000n
 
@@ -80,6 +89,62 @@ export function createRpc () {
     getLatestBlockhash: jest.fn(() => ({ send: async () => ({ value: { blockhash: BLOCKHASH, lastValidBlockHeight: 1n } }) })),
     getFeeForMessage: jest.fn(() => ({ send: async () => ({ value: NETWORK_FEE }) })),
     sendTransaction: jest.fn(() => ({ send: async () => SIGNATURE }))
+  }
+}
+
+/**
+ * Creates a solana rpc that runs the recorded mainnet arbitrum route on the mainnet oft program, in a local svm.
+ *
+ * The svm loads the oft program only, so every quote fails: in the oft program's own checks, or else in the
+ * layerzero endpoint it calls.
+ *
+ * @param {string} payer - The address to fund.
+ * @param {bigint} arbitrumCredits - The amount the arbitrum route can still receive.
+ * @returns {Object} The rpc.
+ */
+export function createProgramRpc (payer, arbitrumCredits) {
+  const svm = new LiteSVM().withSigverify(false).withBlockhashCheck(false)
+  svm.addProgram(DEPLOYMENT.programId, OFT_PROGRAM)
+  svm.warpToSlot(LOOKUP_TABLE_ACTIVE_SLOT)
+
+  for (const [address, { owner, data }] of Object.entries(FIXTURE.accounts)) {
+    const bytes = Buffer.from(data, 'base64')
+    // Credits: discriminator, bump, then a u32-prefixed vector of (u32 eid, u64 amount) entries.
+    if (address === CREDITS) {
+      for (let offset = 13; offset < bytes.length; offset += 12) {
+        if (bytes.readUInt32LE(offset) === 30_110) bytes.writeBigUInt64LE(arbitrumCredits, offset + 4)
+      }
+    }
+    svm.setAccount({ address, programAddress: owner, data: bytes, lamports: 1_000_000_000n, executable: false, space: BigInt(bytes.length) })
+  }
+
+  svm.airdrop(payer, 1_000_000_000n)
+
+  return {
+    getMultipleAccounts: keys => ({
+      send: async () => ({
+        value: keys.map(key => {
+          const account = svm.getAccount(key)
+          return account.exists
+            ? { owner: account.programAddress, data: [Buffer.from(account.data).toString('base64'), 'base64'], lamports: account.lamports, executable: account.executable, space: account.space }
+            : null
+        })
+      })
+    }),
+    simulateTransaction: transaction => ({
+      send: async () => {
+        const decoded = getTransactionDecoder().decode(getBase64Encoder().encode(transaction))
+        const signatures = Object.fromEntries(Object.keys(decoded.signatures).map(address => [address, new Uint8Array(64)]))
+        const failure = svm.simulateTransaction({ ...decoded, signatures })
+        const error = failure.err()
+        const instructionError = typeof error.err === 'function' ? error.err() : undefined
+        const err = instructionError === undefined
+          ? error
+          : { InstructionError: [error.index, typeof instructionError === 'object' ? { Custom: instructionError.code } : instructionError] }
+
+        return { value: { err, logs: failure.meta().logs() } }
+      }
+    })
   }
 }
 
